@@ -1,156 +1,45 @@
-use actix_web::{web, HttpResponse, Responder};
+use actix_web::{web, HttpResponse};
 use sqlx::MySqlPool;
-use serde::{Serialize, Deserialize};
 
-/* ---------- MODEL ---------- */
+use crate::db::resort_queries::get_resort_full;
+use crate::models::resort::*;
 
-#[derive(Serialize, Deserialize)]
-pub struct Resort {
-    pub id: String,
-    pub name: String,
-    pub country: String,
-    pub region: String,
-    pub continent: String,
-    pub latitude: f64,
-    pub longitude: f64,
-    pub village_m: i32,
-    pub min_m: i32,
-    pub max_m: i32,
-    pub ski_area_name: String,
-    pub ski_area_type: String,
-}
-
-/* ---------- HANDLER ---------- */
-
-// GET /resorts
-pub async fn get_resorts(db: web::Data<MySqlPool>) -> impl Responder {
-    let result = sqlx::query_as!(
-        Resort,
-        r#"
-        SELECT id, name, country, region, continent,
-               latitude, longitude, village_m,
-               min_m, max_m, ski_area_name, ski_area_type
-        FROM resorts
-        "#
-    )
-    .fetch_all(db.get_ref())
-    .await;
-
-    match result {
-        Ok(resorts) => HttpResponse::Ok().json(resorts),
-        Err(_) => HttpResponse::InternalServerError().finish(),
-    }
-}
-
-// GET /resorts/{id}
 pub async fn get_resort(
-    db: web::Data<MySqlPool>,
-    id: web::Path<String>,
-) -> impl Responder {
-    let result = sqlx::query_as!(
-        Resort,
-        r#"
-        SELECT id, name, country, region, continent,
-               latitude, longitude, village_m,
-               min_m, max_m, ski_area_name, ski_area_type
-        FROM resorts WHERE id = ?
-        "#,
-        *id
-    )
-    .fetch_one(db.get_ref())
-    .await;
+    pool: web::Data<MySqlPool>,
+    path: web::Path<String>,
+) -> Result<HttpResponse, actix_web::Error> {
 
-    match result {
-        Ok(resort) => HttpResponse::Ok().json(resort),
-        Err(_) => HttpResponse::NotFound().finish(),
-    }
-}
+    let resort_id = path.into_inner();
 
-// POST /resorts
-pub async fn create_resort(
-    db: web::Data<MySqlPool>,
-    resort: web::Json<Resort>,
-) -> impl Responder {
-    let result = sqlx::query!(
-        r#"
-        INSERT INTO resorts
-        (id, name, country, region, continent,
-         latitude, longitude, village_m,
-         min_m, max_m, ski_area_name, ski_area_type)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        "#,
-        resort.id,
-        resort.name,
-        resort.country,
-        resort.region,
-        resort.continent,
-        resort.latitude,
-        resort.longitude,
-        resort.village_m,
-        resort.min_m,
-        resort.max_m,
-        resort.ski_area_name,
-        resort.ski_area_type
-    )
-    .execute(db.get_ref())
-    .await;
+    let (resort, lifts, slopes) =
+        get_resort_full(&pool, &resort_id)
+            .await
+            .map_err(|_| actix_web::error::ErrorNotFound("Resort not found"))?;
 
-    match result {
-        Ok(_) => HttpResponse::Created().finish(),
-        Err(_) => HttpResponse::BadRequest().finish(),
-    }
-}
+    let response = serde_json::json!({
+        "resort": {
+            "id": resort.id,
+            "name": resort.name,
+            "location": {
+                "country": resort.country,
+                "region": resort.region,
+                "continent": resort.continent,
+                "latitude": resort.latitude,
+                "longitude": resort.longitude
+            },
+            "altitude": {
+                "village_m": resort.village_altitude_m,
+                "min_m": resort.min_altitude_m,
+                "max_m": resort.max_altitude_m
+            },
+            "ski_area": {
+                "name": resort.ski_area_name,
+                "type": resort.ski_area_type
+            }
+        },
+        "lifts": lifts,
+        "slopes": slopes
+    });
 
-// PUT /resorts/{id}
-pub async fn update_resort(
-    db: web::Data<MySqlPool>,
-    id: web::Path<String>,
-    resort: web::Json<Resort>,
-) -> impl Responder {
-    let result = sqlx::query!(
-        r#"
-        UPDATE resorts SET
-            name = ?, country = ?, region = ?, continent = ?,
-            latitude = ?, longitude = ?, village_m = ?,
-            min_m = ?, max_m = ?, ski_area_name = ?, ski_area_type = ?
-        WHERE id = ?
-        "#,
-        resort.name,
-        resort.country,
-        resort.region,
-        resort.continent,
-        resort.latitude,
-        resort.longitude,
-        resort.village_m,
-        resort.min_m,
-        resort.max_m,
-        resort.ski_area_name,
-        resort.ski_area_type,
-        *id
-    )
-    .execute(db.get_ref())
-    .await;
-
-    match result {
-        Ok(_) => HttpResponse::Ok().finish(),
-        Err(_) => HttpResponse::BadRequest().finish(),
-    }
-}
-
-// DELETE /resorts/{id}
-pub async fn delete_resort(
-    db: web::Data<MySqlPool>,
-    id: web::Path<String>,
-) -> impl Responder {
-    let result = sqlx::query!(
-        "DELETE FROM resorts WHERE id = ?",
-        *id
-    )
-    .execute(db.get_ref())
-    .await;
-
-    match result {
-        Ok(_) => HttpResponse::NoContent().finish(),
-        Err(_) => HttpResponse::BadRequest().finish(),
-    }
+    Ok(HttpResponse::Ok().json(response))
 }

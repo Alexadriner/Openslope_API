@@ -17,6 +17,8 @@ use crate::security::hash::verify_secret;
 use crate::security::subscription::get_limits;
 use time::OffsetDateTime;
 
+use actix_web::http::header;
+
 pub struct ApiKeyAuth {
     pub pool: MySqlPool,
 }
@@ -66,15 +68,36 @@ where
         Box::pin(async move {
             /* ---------------- API KEY LESEN ---------------- */
 
-            let api_key = match form_urlencoded::parse(req.query_string().as_bytes())
-                .find(|(k, _)| k == "api_key")
-                .map(|(_, v)| v.to_string())
-            {
+            /* ===========================
+            API KEY EXTRAHIEREN
+            =========================== */
+
+            let mut api_key: Option<String> = None;
+
+            // 1️⃣ Bearer Header prüfen
+            if let Some(auth) = req.headers().get(header::AUTHORIZATION) {
+                if let Ok(auth_str) = auth.to_str() {
+                    if let Some(token) = auth_str.strip_prefix("Bearer ") {
+                        api_key = Some(token.to_string());
+                    }
+                }
+            }
+
+            // 2️⃣ Fallback: URL-Parameter (nur GET erlaubt)
+            if api_key.is_none() && method == Method::GET {
+                let query = req.query_string();
+                api_key = form_urlencoded::parse(query.as_bytes())
+                    .find(|(k, _)| k == "api_key")
+                    .map(|(_, v)| v.to_string());
+            }
+
+            // 3️⃣ Wenn immer noch kein Key → Fehler
+            let api_key = match api_key {
                 Some(k) => k,
                 None => {
                     return Ok(req.into_response(
                         HttpResponse::Unauthorized()
-                            .body("Missing api_key")
+                            .body("Missing API key (Bearer or api_key)")
                             .map_into_boxed_body(),
                     ));
                 }

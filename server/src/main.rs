@@ -8,6 +8,8 @@ mod routes;
 mod security;
 mod user_service;
 use user_service::create_user;
+mod models;
+mod db;
 
 use auth::ApiKeyAuth;
 use routes::resorts::*;
@@ -37,13 +39,9 @@ async fn main() -> std::io::Result<()> {
 
         // Geschützte Routen – explizit mit Auth
         .service(
-            web::scope("")
+            web::scope("/resorts")
                 .wrap(ApiKeyAuth { pool: pool.clone() })
-                .route("/resorts", web::get().to(get_resorts))
-                .route("/resorts/{id}", web::get().to(get_resort))
-                .route("/resorts", web::post().to(create_resort))
-                .route("/resorts/{id}", web::put().to(update_resort))
-                .route("/resorts/{id}", web::delete().to(delete_resort))
+                .route("/{id}", web::get().to(get_resort))
         )
     })
     .bind(("127.0.0.1", 8080))?
