@@ -1,6 +1,7 @@
+import "../stylesheets/base.css";
 export default function UserDashboard() {
   return (
-    <div style={{ padding: "2rem", maxWidth: "800px" }}>
+    <div class="page-container">
       <h1>Benutzer-Dashboard</h1>
 
       <section style={{ marginBottom: "2rem" }}>

@@ -1,6 +1,7 @@
+import "../stylesheets/base.css";
 export default function Api() {
   return (
-    <div>
+    <div class="page-container">
       <h1>Ski API</h1>
       <p>
         Unsere API liefert strukturierte Skigebietsdaten für Entwickler:innen.

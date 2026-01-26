@@ -1,6 +1,7 @@
+import "../stylesheets/base.css";
 export default function Contact() {
   return (
-    <div style={{ padding: "2rem", maxWidth: "700px" }}>
+    <div class="page-container">
       <h1>Kontakt</h1>
 
       <p>

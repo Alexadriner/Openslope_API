@@ -1,6 +1,7 @@
+import "../stylesheets/base.css";
 export default function Map() {
   return (
-    <div className="map-page">
+    <div className="map-page" class="page-container">
       <h1>Skimap</h1>
       <p className="map-subtitle">
         Interaktive Skikarte – bald verfügbar ⛷️

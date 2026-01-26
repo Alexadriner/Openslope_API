@@ -1,6 +1,7 @@
+import "../stylesheets/base.css";
 export default function ApiDemo() {
   return (
-    <div>
+    <div class="page-container">
       <h1>API Demo</h1>
       <p>
         Teste hier unsere SkiAPI direkt im Browser.
