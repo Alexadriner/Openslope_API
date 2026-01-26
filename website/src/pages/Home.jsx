@@ -1,8 +1,9 @@
-import "../stylesheets/base.css";
-import "../stylesheets/home.css";
+import SearchInputWithSuggestions from "../components/SearchInputWithSuggestions";
+import { Link } from "react-router-dom";
 
-import "../components/stylesheets/searchInput.css"
-import SearchInput from "../components/SearchInput";
+import "../stylesheets/base.css";
+import "../stylesheets/home.css"
+
 export default function Home() {
   return (
     <div className="page-container">
@@ -10,9 +11,9 @@ export default function Home() {
       <p>Finde Skigebiete oder nutze unsere leistungsstarke API.</p>
 
       <div>
-        <SearchInput placeholder="Skigebiet suchen..." />
-        <button className="home-button">API ausprobieren</button>
-        <button className="home-button">Skigebiete entdecken</button>
+        <SearchInputWithSuggestions placeholder="Skigebiet suchen..." />
+        <Link to="/api/demo" className="home-button">API ausprobieren</Link>
+        <Link to="/resorts" className="home-button">Skigebiete entdecken</Link>
       </div>
     </div>
   );

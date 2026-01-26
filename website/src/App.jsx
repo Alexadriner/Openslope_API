@@ -11,6 +11,7 @@ import UserDashboard from "./pages/UserDashboard";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import Contact from "./pages/Contact";
+import ResortPage from "./pages/ResortPage";
 
 export default function App() {
   return (
@@ -27,6 +28,7 @@ export default function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
         <Route path="/contact" element={<Contact />} />
+        <Route path="/resort/:name" element={<ResortPage />} />
       </Routes>
     </BrowserRouter>
   );

@@ -1,7 +1,14 @@
-const API_BASE = "http://localhost:8000/api/v1";
+const API_BASE = "http://localhost:8080/";
+
+// API-Key hier eintragen
+const API_KEY = "R3StTY4OfadeFJZurXdZ1pZMVbWB3zWuL6FnuPGIbvA";
 
 export async function apiFetch(path, options = {}) {
-  const res = await fetch(`${API_BASE}${path}`, {
+  // URL mit API-Key als Query-Parameter
+  const url = new URL(`${API_BASE}${path}`);
+  url.searchParams.append("api_key", API_KEY);
+
+  const res = await fetch(url.toString(), {
     headers: {
       "Content-Type": "application/json",
       ...options.headers,

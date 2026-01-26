@@ -16,6 +16,8 @@ use routes::lifts::*;
 
 use routes::auth::{signup, signin};
 
+use actix_cors::Cors;
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     dotenv().ok();
@@ -31,6 +33,13 @@ async fn main() -> std::io::Result<()> {
 
     HttpServer::new(move || {
     App::new()
+    // CORS Middleware einfügen
+        .wrap(
+            Cors::default()
+                .allow_any_origin()   // erlaubt Zugriff von jedem Frontend (für Entwicklung)
+                .allow_any_method()   // GET, POST, PUT, DELETE etc.
+                .allow_any_header()   // alle Header erlaubt
+        )
         .app_data(web::Data::new(pool.clone()))
 
         // Öffentliche Routen – garantiert ohne Auth
@@ -57,7 +66,7 @@ async fn main() -> std::io::Result<()> {
                 .route("/slopes/{id}", web::delete().to(delete_slope))
 
                 // Lifts
-                .route("/lifts", web::get().to(get_lifts))
+                .route("/lifts", web::get().to(get_lift))
                 .route("/lifts/{id}", web::get().to(get_lift))
                 .route("/lifts", web::post().to(create_lift))
                 .route("/lifts/{id}", web::put().to(update_lift))
