@@ -1,0 +1,16 @@
+/* ============================= */
+/* Zentriertes Layout            */
+/* ============================= */
+
+.page-container {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 4vh 2vw;
+}
+
+.home-button {
+    margin: 10px;
+}

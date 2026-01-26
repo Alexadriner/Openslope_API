@@ -1,6 +1,7 @@
+import "../stylesheets/base.css";
 export default function Login() {
   return (
-    <div style={{ padding: "2rem", maxWidth: "400px" }}>
+    <div class="page-container">
       <h1>Login</h1>
 
       <p>Melde dich mit deinem Benutzerkonto an.</p>

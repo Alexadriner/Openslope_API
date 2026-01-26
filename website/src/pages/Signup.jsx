@@ -1,6 +1,7 @@
+import "../stylesheets/base.css";
 export default function Signup() {
   return (
-    <div style={{ padding: "2rem", maxWidth: "400px" }}>
+    <div class="page-container">
       <h1>Registrieren</h1>
 
       <p>Erstelle ein neues Benutzerkonto.</p>

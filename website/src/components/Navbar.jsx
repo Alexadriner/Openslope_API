@@ -1,16 +1,26 @@
 import { Link } from "react-router-dom";
+import "./stylesheets/navbar.css";
+
 
 export default function Navbar() {
-  return (
-    <nav>
-      <Link to="/">Start</Link>
-      <Link to="/resorts">Skigebiete</Link>
-      <Link to="/map">Skimap</Link>
-      <Link to="/api">API</Link>
-      <Link to="/api/demo">Demo</Link>
-      <Link to="/user">Benutzer</Link>
-      <Link to="/contact">Kontakt</Link>
-      <Link to="/login">Login</Link>
-    </nav>
-  );
+return (
+<nav className="navbar">
+{/* Website-Funktionen */}
+<div className="nav-section">
+<Link className="nav-button" to="/">Start</Link>
+<Link className="nav-button" to="/resorts">Skigebiete</Link>
+<Link className="nav-button" to="/map">Skimap</Link>
+<Link className="nav-button" to="/contact">Kontakt</Link>
+</div>
+
+
+{/* Account / API */}
+<div className="nav-section">
+<Link className="nav-button" to="/api">API</Link>
+<Link className="nav-button" to="/api/demo">Demo</Link>
+<Link className="nav-button" to="/user">Account</Link>
+<Link className="nav-button" to="/login">Login</Link>
+</div>
+</nav>
+);
 }

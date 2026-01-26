@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "../api/client";
 import { Link } from "react-router-dom";
+import "../stylesheets/base.css";
 
 export default function Resorts() {
   const [resorts, setResorts] = useState([]);
@@ -10,7 +11,7 @@ export default function Resorts() {
   }, []);
 
   return (
-    <div>
+    <div class="page-container">
       <h1>Skigebiete</h1>
       <ul>
         {resorts.map(r => (

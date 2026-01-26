@@ -1,6 +1,7 @@
 import { useParams } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { apiFetch } from "../api/client";
+import "../stylesheets/base.css";
 
 export default function ResortDetail() {
   const { id } = useParams();
@@ -13,7 +14,7 @@ export default function ResortDetail() {
   if (!resort) return <p>Lade...</p>;
 
   return (
-    <div>
+    <div class="page-container">
       <h1>{resort.name}</h1>
       <p>{resort.land} – {resort.region}</p>
       <p>Höhe: {resort.höhe} m</p>
