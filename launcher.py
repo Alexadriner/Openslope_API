@@ -5,7 +5,7 @@ import time
 # =========================
 # CONFIG
 # =========================
-NUM_WORKERS = 20         # Anzahl Worker
+NUM_WORKERS = 25         # Anzahl Worker
 SCRIPT_NAME = "ski_scraper.py"  # Dein Hauptskript
 START_DELAY = 15          # Sekunden zwischen Starts (wichtig für Overpass)
 

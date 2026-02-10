@@ -12,7 +12,7 @@ CSV_FILE = "ski-resorts.csv"
 LAST_RESORT_FILE = "last_resort.txt"
 
 OVERPASS_URL = "https://overpass.kumi.systems/api/interpreter"
-OVERPASS_RADIUS = 7000
+OVERPASS_RADIUS = 5000
 MAX_RETRIES = 3
 
 API_BASE_URL = "http://localhost:8080"
@@ -293,7 +293,7 @@ def main():
     worker_id = int(sys.argv[1]) if len(sys.argv) > 1 else 0
 
     # Abstand
-    step = 20
+    step = 25
 
     resorts = parse_csv(CSV_FILE)
 

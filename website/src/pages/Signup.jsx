@@ -1,54 +1,80 @@
-import "../stylesheets/base.css";
+import { useState } from "react";
+import { signup } from "../api/auth";
+import { useAuth } from "../context/AuthContext";
+import { useNavigate } from "react-router-dom";
+
 export default function Signup() {
+  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [apiKey, setApiKey] = useState(null);
+
+  const { saveKey } = useAuth();
+  const navigate = useNavigate();
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+
+    try {
+      const data = await signup(username, email, password);
+
+      // speichern
+      saveKey(data.api_key);
+
+      // EINMAL anzeigen
+      setApiKey(data.api_key);
+    } catch (err) {
+      alert(err.message);
+    }
+  }
+
+  // Wenn Key da ist: Warnseite
+  if (apiKey) {
+    return (
+      <div className="page-container">
+        <h1>Wichtig!</h1>
+
+        <p>Speichere deinen API-Key jetzt:</p>
+
+        <code>{apiKey}</code>
+
+        <p>
+          Dieser Key wird dir nie wieder angezeigt.
+        </p>
+
+        <button onClick={() => navigate("/user")}>
+          Weiter
+        </button>
+      </div>
+    );
+  }
+
   return (
-    <div class="page-container">
+    <div className="page-container">
       <h1>Registrieren</h1>
 
-      <p>Erstelle ein neues Benutzerkonto.</p>
+      <form onSubmit={handleSubmit}>
+        <input
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          placeholder="Name"
+        />
 
-      <form>
-        <div style={{ marginBottom: "1rem" }}>
-          <label>
-            Name
-            <br />
-            <input
-              type="text"
-              placeholder="Max Mustermann"
-              style={{ width: "100%" }}
-            />
-          </label>
-        </div>
+        <input
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="Email"
+        />
 
-        <div style={{ marginBottom: "1rem" }}>
-          <label>
-            E-Mail
-            <br />
-            <input
-              type="email"
-              placeholder="name@example.com"
-              style={{ width: "100%" }}
-            />
-          </label>
-        </div>
+        <input
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="Passwort"
+        />
 
-        <div style={{ marginBottom: "1rem" }}>
-          <label>
-            Passwort
-            <br />
-            <input
-              type="password"
-              placeholder="********"
-              style={{ width: "100%" }}
-            />
-          </label>
-        </div>
-
-        <button type="submit">Konto erstellen</button>
+        <button>Registrieren</button>
       </form>
-
-      <p style={{ marginTop: "1rem" }}>
-        Bereits registriert? <a href="/login">Zum Login</a>
-      </p>
     </div>
   );
 }

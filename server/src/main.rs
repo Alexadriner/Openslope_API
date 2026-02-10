@@ -66,7 +66,7 @@ async fn main() -> std::io::Result<()> {
                 .route("/slopes/{id}", web::delete().to(delete_slope))
 
                 // Lifts
-                .route("/lifts", web::get().to(get_lift))
+                .route("/lifts", web::get().to(get_lifts))
                 .route("/lifts/{id}", web::get().to(get_lift))
                 .route("/lifts", web::post().to(create_lift))
                 .route("/lifts/{id}", web::put().to(update_lift))

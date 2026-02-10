@@ -1,42 +1,50 @@
-import "../stylesheets/base.css";
+import { useState } from "react";
+import { signin } from "../api/auth";
+import { useAuth } from "../context/AuthContext";
+import { useNavigate } from "react-router-dom";
+
 export default function Login() {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+
+  const { loginSuccess } = useAuth();
+  const navigate = useNavigate();
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+
+    try {
+      await signin(email, password);
+
+      // Nur Status setzen
+      loginSuccess();
+
+      navigate("/user");
+    } catch (err) {
+      alert(err);
+    }
+  }
+
   return (
-    <div class="page-container">
+    <div className="page-container">
       <h1>Login</h1>
 
-      <p>Melde dich mit deinem Benutzerkonto an.</p>
+      <form onSubmit={handleSubmit}>
+        <input
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="Email"
+        />
 
-      <form>
-        <div style={{ marginBottom: "1rem" }}>
-          <label>
-            E-Mail
-            <br />
-            <input
-              type="email"
-              placeholder="name@example.com"
-              style={{ width: "100%" }}
-            />
-          </label>
-        </div>
+        <input
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="Passwort"
+        />
 
-        <div style={{ marginBottom: "1rem" }}>
-          <label>
-            Passwort
-            <br />
-            <input
-              type="password"
-              placeholder="********"
-              style={{ width: "100%" }}
-            />
-          </label>
-        </div>
-
-        <button type="submit">Login</button>
+        <button>Login</button>
       </form>
-
-      <p style={{ marginTop: "1rem" }}>
-        Noch kein Konto? <a href="/signup">Jetzt registrieren</a>
-      </p>
     </div>
   );
 }
