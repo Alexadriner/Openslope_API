@@ -145,6 +145,20 @@ def api_delete(path):
 # CHECKPOINT HELPERS
 # =========================
 
+def write_checkpoint(data):
+    """
+    Schreibt Checkpoint atomar, damit keine korrupten/NUL-Dateien entstehen.
+    """
+    tmp_path = f"{CHECKPOINT_PATH}.tmp"
+
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(data, f)
+        f.flush()
+        os.fsync(f.fileno())
+
+    os.replace(tmp_path, CHECKPOINT_PATH)
+
+
 def save_checkpoint(entity_type, index, entity_id):
     """
     Speichert aktuellen Stand
@@ -156,8 +170,7 @@ def save_checkpoint(entity_type, index, entity_id):
         "timestamp": time.time()
     }
 
-    with open(CHECKPOINT_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f)
+    write_checkpoint(data)
 
     logger.debug(f"Checkpoint saved: {data}")
 
@@ -171,7 +184,24 @@ def load_checkpoint():
 
     try:
         with open(CHECKPOINT_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
+            raw = f.read()
+
+        if not raw.strip():
+            logger.warning("Checkpoint empty. Ignoring.")
+            return None
+
+        data = json.loads(raw)
+
+        if not isinstance(data, dict):
+            logger.warning("Checkpoint has invalid format. Ignoring.")
+            return None
+
+        required = {"entity_type", "index", "entity_id", "timestamp"}
+        if not required.issubset(data.keys()):
+            logger.warning("Checkpoint missing required keys. Ignoring.")
+            return None
+
+        return data
     except Exception as e:
         logger.error(f"Checkpoint corrupted: {e}")
         return None
@@ -190,16 +220,13 @@ def save_phase(phase):
     """
     Update/Delete Phase speichern
     """
-    if not os.path.exists(CHECKPOINT_PATH):
+    checkpoint = load_checkpoint()
+    if not checkpoint:
         return
 
-    with open(CHECKPOINT_PATH, "r+", encoding="utf-8") as f:
-        data = json.load(f)
-        data["phase"] = phase
+    checkpoint["phase"] = phase
+    write_checkpoint(checkpoint)
 
-        f.seek(0)
-        json.dump(data, f)
-        f.truncate()
 
 
 
@@ -247,7 +274,7 @@ def cleanup_entities(entities, resorts, entity_type):
         # -----------------------
         name = normalize_name(e.get("name"))
         if not name:
-            if entity_type == "lift":
+            if entity_type in ("lift", "lifts"):
                 name = generate_fallback_name(
                     "lift",
                     lift_type=e.get("lift_type"),
@@ -290,19 +317,44 @@ def apply_changes(valid, delete, entity_type, checkpoint=None):
     start_index_update = 0
     start_index_delete = 0
 
+    def index_from_entity_id(items, entity_id):
+        for idx, item in enumerate(items):
+            if item.get("id") == entity_id:
+                return idx
+        return None
+
     # Resume-Logik
-    if checkpoint and checkpoint["entity_type"] == entity_type:
+    if checkpoint and checkpoint.get("entity_type") == entity_type:
 
-        if checkpoint["phase"] == "update":
-            start_index_update = checkpoint["index"]
+        phase = checkpoint.get("phase", "update")
+        index = checkpoint.get("index", 0)
+        checkpoint_id = checkpoint.get("entity_id")
 
-        elif checkpoint["phase"] == "delete":
-            start_index_delete = checkpoint["index"]
+        try:
+            index = int(index)
+        except (TypeError, ValueError):
+            index = 0
+
+        if phase == "update":
+            resolved_index = index_from_entity_id(valid, checkpoint_id)
+            start_index_update = resolved_index if resolved_index is not None else index
+        elif phase == "delete":
+            # Update-Phase ist bereits durch, nur Delete fortsetzen.
+            start_index_update = len(valid)
+            resolved_index = index_from_entity_id(delete, checkpoint_id)
+            start_index_delete = resolved_index if resolved_index is not None else index
+        else:
+            logger.warning(
+                f"Unknown checkpoint phase '{phase}'. Starting {entity_type} from beginning."
+            )
 
         logger.info(
             f"Resuming {entity_type} "
             f"(update={start_index_update}, delete={start_index_delete})"
         )
+
+    start_index_update = max(0, min(start_index_update, len(valid)))
+    start_index_delete = max(0, min(start_index_delete, len(delete)))
 
     # ---------------- UPDATE ----------------
 

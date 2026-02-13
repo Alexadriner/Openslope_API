@@ -1,34 +1,31 @@
-import "../stylesheets/base.css";
+﻿import "../stylesheets/base.css";
+
 export default function Contact() {
   return (
-    <div class="page-container">
-      <h1>Kontakt</h1>
+    <div className="page-container">
+      <h1>Contact</h1>
 
       <p>
-        Du hast Fragen zur SkiAPI, wünschst dir neue Features oder brauchst
-        Support? Melde dich gerne bei uns.
+        Do you have questions about SkiAPI, want new features, or need support?
+        Feel free to reach out.
       </p>
 
-      <h2>Kontaktinformationen</h2>
+      <h2>Contact Information</h2>
       <ul>
         <li>
           <strong>Support:</strong>{" "}
-          <a href="mailto:support@skiapi.example">
-            support@skiapi.example
-          </a>
+          <a href="mailto:support@skiapi.example">support@skiapi.example</a>
         </li>
         <li>
           <strong>Business:</strong>{" "}
-          <a href="mailto:business@skiapi.example">
-            business@skiapi.example
-          </a>
+          <a href="mailto:business@skiapi.example">business@skiapi.example</a>
         </li>
       </ul>
 
-      <h2>Feedback & Wünsche</h2>
+      <h2>Feedback & Requests</h2>
       <p>
-        Wir freuen uns über Feedback, Feature-Wünsche oder allgemeine Anfragen.
-        Ein Kontaktformular folgt in einer späteren Version.
+        We appreciate feedback, feature requests, and general inquiries.
+        A contact form will be added in a future version.
       </p>
 
       <div
@@ -41,7 +38,7 @@ export default function Contact() {
         }}
       >
         <p>
-          📬 <em>Kontaktformular (Coming Soon)</em>
+          <em>Contact form (Coming Soon)</em>
         </p>
       </div>
     </div>

@@ -1,9 +1,19 @@
-import "../stylesheets/base.css";
+﻿import "../stylesheets/base.css";
 import { useAuth } from "../context/AuthContext";
 import { useNavigate } from "react-router-dom";
 
+function maskApiKey(key) {
+  if (!key) {
+    return "Not available";
+  }
+  if (key.length <= 10) {
+    return "**********";
+  }
+  return `${key.slice(0, 6)}...${key.slice(-4)}`;
+}
+
 export default function UserDashboard() {
-  const { logout } = useAuth();
+  const { user, apiKey, logout } = useAuth();
   const navigate = useNavigate();
 
   function handleLogout() {
@@ -13,64 +23,32 @@ export default function UserDashboard() {
 
   return (
     <div className="page-container">
-      <h1>Benutzer-Dashboard</h1>
+      <h1>User Dashboard</h1>
 
-      {/* Profil */}
       <section style={{ marginBottom: "2rem" }}>
-        <h2>Profil</h2>
-
+        <h2>Profile</h2>
         <p>
-          <strong>Name:</strong> Gespeichert
+          <strong>Name:</strong> {user?.name ?? "Unknown"}
           <br />
-          <strong>E-Mail:</strong> Gespeichert
+          <strong>Email:</strong> {user?.email ?? "Unknown"}
           <br />
-          <strong>Abonnement:</strong> Free
-        </p>
-
-        <p style={{ fontSize: "0.9rem", color: "#666" }}>
-          (Profildaten werden später aus dem Backend geladen)
+          <strong>Subscription:</strong> {user?.subscription ?? "Unknown"}
+          <br />
+          <strong>Role:</strong> {user?.is_admin ? "Admin" : "User"}
         </p>
       </section>
 
-      {/* API Keys */}
       <section style={{ marginBottom: "2rem" }}>
-        <h2>API-Keys</h2>
-
-        <p>
-          Dein API-Key wurde bei der Registrierung erstellt und sicher
-          gespeichert.
-        </p>
-
-        <p style={{ color: "#555" }}>
-          Aus Sicherheitsgründen wird er nicht mehr angezeigt.
-        </p>
-
-        <ul>
-          <li>
-            <code>••••••••••••••••</code> – aktiv – Rate Limit: 1000 req/Tag
-          </li>
-        </ul>
-
-        <button disabled>
-          Neuen API-Key erstellen (coming soon)
-        </button>
+        <h2>API Key</h2>
+        <p>Active key: <code>{maskApiKey(apiKey)}</code></p>
+        <p style={{ color: "#555" }}>A new API key is issued at each login.</p>
       </section>
 
-      {/* Account */}
       <section>
-        <h2>Account-Einstellungen</h2>
-
-        <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap" }}>
-          <button disabled>Passwort ändern</button>
-          <button disabled>E-Mail ändern</button>
-
-          <button
-            onClick={handleLogout}
-            style={{ color: "red", borderColor: "red" }}
-          >
-            Logout
-          </button>
-        </div>
+        <h2>Account</h2>
+        <button onClick={handleLogout} style={{ color: "red", borderColor: "red" }}>
+          Logout
+        </button>
       </section>
     </div>
   );

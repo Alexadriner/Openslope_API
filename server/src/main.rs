@@ -7,14 +7,13 @@ mod auth;
 mod routes;
 mod security;
 mod user_service;
-use user_service::create_user;
 
 use auth::ApiKeyAuth;
 use routes::resorts::*;
 use routes::slopes::*;
 use routes::lifts::*;
 
-use routes::auth::{signup, signin};
+use routes::auth::{signup, signin, me};
 
 use actix_cors::Cors;
 
@@ -71,6 +70,9 @@ async fn main() -> std::io::Result<()> {
                 .route("/lifts", web::post().to(create_lift))
                 .route("/lifts/{id}", web::put().to(update_lift))
                 .route("/lifts/{id}", web::delete().to(delete_lift))
+
+                // User
+                .route("/me", web::get().to(me))
         )
     })
     .bind(("127.0.0.1", 8080))?

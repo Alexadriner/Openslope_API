@@ -1,4 +1,4 @@
-import { useState } from "react";
+﻿import { useState } from "react";
 import { signin } from "../api/auth";
 import { useAuth } from "../context/AuthContext";
 import { useNavigate } from "react-router-dom";
@@ -6,22 +6,25 @@ import { useNavigate } from "react-router-dom";
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
-  const { loginSuccess } = useAuth();
+  const { login } = useAuth();
   const navigate = useNavigate();
 
   async function handleSubmit(e) {
     e.preventDefault();
+    setError("");
+    setSubmitting(true);
 
     try {
-      await signin(email, password);
-
-      // Nur Status setzen
-      loginSuccess();
-
+      const authData = await signin(email, password);
+      login(authData);
       navigate("/user");
     } catch (err) {
-      alert(err);
+      setError(err.message || "Login failed");
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -34,17 +37,23 @@ export default function Login() {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="Email"
+          autoComplete="email"
+          required
         />
 
         <input
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          placeholder="Passwort"
+          placeholder="Password"
+          autoComplete="current-password"
+          required
         />
 
-        <button>Login</button>
+        <button disabled={submitting}>{submitting ? "Logging in..." : "Login"}</button>
       </form>
+
+      {error && <p style={{ color: "crimson" }}>{error}</p>}
     </div>
   );
 }

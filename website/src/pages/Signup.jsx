@@ -1,4 +1,4 @@
-import { useState } from "react";
+﻿import { useState } from "react";
 import { signup } from "../api/auth";
 import { useAuth } from "../context/AuthContext";
 import { useNavigate } from "react-router-dom";
@@ -8,73 +8,74 @@ export default function Signup() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [apiKey, setApiKey] = useState(null);
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
-  const { saveKey } = useAuth();
+  const { login } = useAuth();
   const navigate = useNavigate();
 
   async function handleSubmit(e) {
     e.preventDefault();
+    setError("");
+    setSubmitting(true);
 
     try {
-      const data = await signup(username, email, password);
-
-      // speichern
-      saveKey(data.api_key);
-
-      // EINMAL anzeigen
-      setApiKey(data.api_key);
+      const authData = await signup(username, email, password);
+      login(authData);
+      setApiKey(authData.api_key);
     } catch (err) {
-      alert(err.message);
+      setError(err.message || "Sign up failed");
+    } finally {
+      setSubmitting(false);
     }
   }
 
-  // Wenn Key da ist: Warnseite
   if (apiKey) {
     return (
       <div className="page-container">
-        <h1>Wichtig!</h1>
-
-        <p>Speichere deinen API-Key jetzt:</p>
-
+        <h1>Important</h1>
+        <p>Save your API key now:</p>
         <code>{apiKey}</code>
-
-        <p>
-          Dieser Key wird dir nie wieder angezeigt.
-        </p>
-
-        <button onClick={() => navigate("/user")}>
-          Weiter
-        </button>
+        <p>This key will not be shown again for security reasons.</p>
+        <button onClick={() => navigate("/user")}>Continue to Dashboard</button>
       </div>
     );
   }
 
   return (
     <div className="page-container">
-      <h1>Registrieren</h1>
+      <h1>Sign Up</h1>
 
       <form onSubmit={handleSubmit}>
         <input
           value={username}
           onChange={(e) => setUsername(e.target.value)}
           placeholder="Name"
+          autoComplete="name"
+          required
         />
 
         <input
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="Email"
+          autoComplete="email"
+          required
         />
 
         <input
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          placeholder="Passwort"
+          placeholder="Password"
+          autoComplete="new-password"
+          required
         />
 
-        <button>Registrieren</button>
+        <button disabled={submitting}>{submitting ? "Signing up..." : "Sign Up"}</button>
       </form>
+
+      {error && <p style={{ color: "crimson" }}>{error}</p>}
     </div>
   );
 }

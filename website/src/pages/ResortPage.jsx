@@ -1,4 +1,4 @@
-import { useParams } from "react-router-dom";
+﻿import { useParams } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { apiFetch } from "../api/client";
 
@@ -19,74 +19,59 @@ export default function ResortPage() {
         const slopesData = await apiFetch("slopes");
         const liftsData = await apiFetch("lifts");
 
-        const foundResort = resortsData.find(
-          (r) => r.name === name
-        );
-
+        const foundResort = resortsData.find((r) => r.name === name);
         if (!foundResort) return;
 
-        const resortSlopes = slopesData.filter(
-          (s) => s.resort_id === foundResort.id
-        );
-
-        const resortLifts = liftsData.filter(
-          (l) => l.resort_id === foundResort.id
-        );
+        const resortSlopes = slopesData.filter((s) => s.resort_id === foundResort.id);
+        const resortLifts = liftsData.filter((l) => l.resort_id === foundResort.id);
 
         setResort(foundResort);
         setSlopes(resortSlopes);
         setLifts(resortLifts);
-
       } catch (err) {
-        console.error("API Fehler:", err);
+        console.error("API error:", err);
       }
     }
 
     loadData();
   }, [name]);
 
-  if (!resort) return <p>Lade Resort...</p>;
+  if (!resort) return <p>Loading resort...</p>;
 
   return (
     <div className="page-container resort-page">
-
-      {/* HEADER */}
       <div className="resort-header">
         <h1>{resort.name}</h1>
 
         <p>
           {resort.country}
-          {resort.region ? ` – ${resort.region}` : ""}
+          {resort.region ? ` - ${resort.region}` : ""}
         </p>
 
         <div className="resort-info-grid">
-          <p>Kontinent: {resort.continent ?? "N/A"}</p>
-          <p>Ortshöhe: {resort.village_altitude_m ?? "N/A"} m</p>
+          <p>Continent: {resort.continent ?? "N/A"}</p>
+          <p>Village altitude: {resort.village_altitude_m ?? "N/A"} m</p>
           <p>Min: {resort.min_altitude_m ?? "N/A"} m</p>
           <p>Max: {resort.max_altitude_m ?? "N/A"} m</p>
-          <p>Ski Area: {resort.ski_area_name ?? "N/A"}</p>
+          <p>Ski area: {resort.ski_area_name ?? "N/A"}</p>
 
           {resort.latitude && resort.longitude && (
             <p>
-              Koordinaten: {resort.latitude}, {resort.longitude}
+              Coordinates: {resort.latitude}, {resort.longitude}
             </p>
           )}
         </div>
       </div>
 
-
-      {/* TABELLEN */}
       <div className="tables-container">
-
-        {/* PISTEN */}
         <div className="table-box">
-          <h2>🏂 Pisten</h2>
+          <h2>Slopes</h2>
 
           <table>
             <thead>
               <tr>
                 <th>Name</th>
-                <th>Schwierigkeit</th>
+                <th>Difficulty</th>
                 <th></th>
               </tr>
             </thead>
@@ -94,16 +79,14 @@ export default function ResortPage() {
             <tbody>
               {slopes.map((slope) => (
                 <tr key={slope.id}>
-                  <td>{slope.name ?? "Unbekannt"}</td>
+                  <td>{slope.name ?? "Unknown"}</td>
 
                   <td className={`difficulty ${slope.difficulty}`}>
                     {slope.difficulty}
                   </td>
 
                   <td>
-                    <span
-                      className={`difficulty-dot ${slope.difficulty}`}
-                    />
+                    <span className={`difficulty-dot ${slope.difficulty}`} />
                   </td>
                 </tr>
               ))}
@@ -111,30 +94,27 @@ export default function ResortPage() {
           </table>
         </div>
 
-
-        {/* LIFTE */}
         <div className="table-box">
-          <h2>🚠 Lifte</h2>
+          <h2>Lifts</h2>
 
           <table>
             <thead>
               <tr>
                 <th>Name</th>
-                <th>Typ</th>
+                <th>Type</th>
               </tr>
             </thead>
 
             <tbody>
               {lifts.map((lift) => (
                 <tr key={lift.id}>
-                  <td>{lift.name ?? "Unbenannt"}</td>
+                  <td>{lift.name ?? "Unnamed"}</td>
                   <td>{lift.lift_type}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-
       </div>
     </div>
   );

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+﻿import { useEffect, useState } from "react";
 import { apiFetch } from "../api/client";
 import { Link } from "react-router-dom";
 import "../stylesheets/base.css";
@@ -11,13 +11,13 @@ export default function Resorts() {
   }, []);
 
   return (
-    <div class="page-container">
-      <h1>Skigebiete</h1>
+    <div className="page-container">
+      <h1>Resorts</h1>
       <ul>
-        {resorts.map(r => (
+        {resorts.map((r) => (
           <li key={r.id}>
             <Link to={`/resorts/${r.id}`}>
-              {r.name} – {r.land}
+              {r.name} - {r.country ?? "N/A"}
             </Link>
           </li>
         ))}

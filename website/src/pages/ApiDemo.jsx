@@ -1,11 +1,10 @@
-import "../stylesheets/base.css";
+﻿import "../stylesheets/base.css";
+
 export default function ApiDemo() {
   return (
-    <div class="page-container">
+    <div className="page-container">
       <h1>API Demo</h1>
-      <p>
-        Teste hier unsere SkiAPI direkt im Browser.
-      </p>
+      <p>Test our SkiAPI directly in the browser.</p>
 
       <label>
         Endpoint:
@@ -16,14 +15,13 @@ export default function ApiDemo() {
         </select>
       </label>
 
-      <br /><br />
+      <br />
+      <br />
 
-      <button>Request senden</button>
+      <button>Send request</button>
 
       <h3>Response</h3>
-      <pre>
-        {"{ }"}
-      </pre>
+      <pre>{"{ }"}</pre>
     </div>
   );
 }
