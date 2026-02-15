@@ -22,7 +22,7 @@ export default function Navbar() {
 
       <div className="nav-section">
         <Link className="nav-button" to="/api">API</Link>
-        <Link className="nav-button" to="/api/demo">Demo</Link>
+        <Link className="nav-button" to="/api/demo">API-Demo</Link>
         {loggedIn ? (
           <>
             <Link className="nav-button" to="/user">Account</Link>
