@@ -358,18 +358,24 @@ processed_slope_ids = set()
 
 
 def setup_worker_logging(worker_id: int):
+    import logging
     os.makedirs(LOG_DIR, exist_ok=True)
     log_filename = datetime.now().strftime(f"scraper_worker_{worker_id}_%Y-%m-%d_%H-%M-%S.log")
     log_path = LOG_DIR / log_filename
 
+    # Remove all existing handlers (wenn du mehrfach testest)
+    for handler in logging.root.handlers[:]:
+        logging.root.removeHandler(handler)
+
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.DEBUG,
         format="%(asctime)s | %(levelname)s | %(message)s",
         handlers=[
-            logging.FileHandler(log_path, encoding="utf-8"),
+            logging.FileHandler(str(log_path), encoding="utf-8"),
             logging.StreamHandler(),
         ],
     )
+
 
 
 def extract_coordinates(element):
@@ -505,12 +511,22 @@ def send_slope(resort_id, tags, osm_id, element):
         return
     processed_slope_ids.add(osm_id)
 
-    difficulty = PISTE_DIFFICULTY_MAP.get(tags.get("piste:difficulty"))
+    raw_difficulty = tags.get("piste:difficulty")
+    difficulty = PISTE_DIFFICULTY_MAP.get(raw_difficulty)
+
     if not difficulty:
+        logger.debug(
+            f"Slope {osm_id} ignored (difficulty='{raw_difficulty}') in resort {resort_id}"
+        )
         return
 
     start_lat, start_lon, end_lat, end_lon = extract_endpoints(element)
     normalized_name = normalize_name(tags.get("name"))
+
+    logger.info(
+        f"Slope detected: {normalized_name} | diff={difficulty} "
+        f"| start=({start_lat},{start_lon}) end=({end_lat},{end_lon})"
+    )
 
     append_coordinate_event(
         entity_type="slopes",
@@ -537,6 +553,7 @@ def send_slope(resort_id, tags, osm_id, element):
     }
 
     save_entity("slopes", osm_id, payload)
+
 
 
 def build_relation_geometries(elements):
@@ -594,6 +611,7 @@ def process_osm_data(osm_data, resort_id):
     # ----- LIFTS -----
     if osm_data.get("lifts"):
         lift_elements = osm_data["lifts"].get("elements", [])
+        logger.info(f"{len(lift_elements)} Lift-Elemente gefunden")
 
         for el in lift_elements:
             if el.get("type") == "way":
@@ -602,12 +620,21 @@ def process_osm_data(osm_data, resort_id):
     # ----- SLOPES -----
     if osm_data.get("slopes"):
         slope_elements = osm_data["slopes"].get("elements", [])
+        logger.info(f"{len(slope_elements)} Slope-Elemente gefunden (raw)")
 
         slope_elements = build_relation_geometries(slope_elements)
 
+        processed_counter = 0
+
         for el in slope_elements:
             if el.get("type") in ("way", "relation"):
+                before = len(processed_slope_ids)
                 send_slope(resort_id, el.get("tags", {}), el["id"], el)
+                if len(processed_slope_ids) > before:
+                    processed_counter += 1
+
+        logger.info(f"{processed_counter} Pisten verarbeitet")
+
 
 
 
