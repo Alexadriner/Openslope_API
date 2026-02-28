@@ -1,42 +1,81 @@
-﻿import { useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { apiFetch } from "../api/client";
 
 import "../stylesheets/resort-page.css";
 import "../stylesheets/base.css";
 
+function normalizeResortName(value) {
+  return (value ?? "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\u2010-\u2015]/g, "-")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function safeDecode(value) {
+  try {
+    return decodeURIComponent(value ?? "");
+  } catch {
+    return value ?? "";
+  }
+}
+
 export default function ResortPage() {
   const { name } = useParams();
 
   const [resort, setResort] = useState(null);
-  const [slopes, setSlopes] = useState([]);
-  const [lifts, setLifts] = useState([]);
+  const [isNotFound, setIsNotFound] = useState(false);
 
   useEffect(() => {
     async function loadData() {
       try {
-        const resortsData = await apiFetch("resorts");
-        const slopesData = await apiFetch("slopes");
-        const liftsData = await apiFetch("lifts");
+        setIsNotFound(false);
+        setResort(null);
 
-        const foundResort = resortsData.find((r) => r.name === name);
-        if (!foundResort) return;
+        const resortsData = await apiFetch("resorts?summary=true");
+        const targetName = normalizeResortName(safeDecode(name));
+        const foundResort = resortsData.find(
+          (r) => normalizeResortName(r.name) === targetName
+        );
 
-        const resortSlopes = slopesData.filter((s) => s.resort_id === foundResort.id);
-        const resortLifts = liftsData.filter((l) => l.resort_id === foundResort.id);
+        if (!foundResort?.id) {
+          setIsNotFound(true);
+          return;
+        }
 
-        setResort(foundResort);
-        setSlopes(resortSlopes);
-        setLifts(resortLifts);
+        const resortDetail = await apiFetch(`/resorts/${foundResort.id}`);
+        setResort(resortDetail);
       } catch (err) {
         console.error("API error:", err);
+        setIsNotFound(true);
       }
     }
 
     loadData();
   }, [name]);
 
+  if (isNotFound) return <p>Resort not found.</p>;
   if (!resort) return <p>Loading resort...</p>;
+
+  const country = resort.geography?.country ?? resort.country ?? "N/A";
+  const region = resort.geography?.region ?? resort.region;
+  const continent = resort.geography?.continent ?? resort.continent;
+
+  const latitude = resort.geography?.coordinates?.latitude ?? resort.latitude;
+  const longitude = resort.geography?.coordinates?.longitude ?? resort.longitude;
+
+  const villageAltitude = resort.altitude?.village_m ?? resort.village_altitude_m;
+  const minAltitude = resort.altitude?.min_m ?? resort.min_altitude_m;
+  const maxAltitude = resort.altitude?.max_m ?? resort.max_altitude_m;
+
+  const skiAreaName = resort.ski_area?.name ?? resort.ski_area_name;
+  const skiAreaType = resort.ski_area?.area_type ?? resort.ski_area_type;
+
+  const slopes = resort.slopes ?? [];
+  const lifts = resort.lifts ?? [];
 
   return (
     <div className="page-container resort-page">
@@ -44,22 +83,23 @@ export default function ResortPage() {
         <h1>{resort.name}</h1>
 
         <p>
-          {resort.country}
-          {resort.region ? ` - ${resort.region}` : ""}
+          {country}
+          {region ? ` - ${region}` : ""}
         </p>
 
         <div className="resort-info-grid">
-          <p>Continent: {resort.continent ?? "N/A"}</p>
-          <p>Village altitude: {resort.village_altitude_m ?? "N/A"} m</p>
-          <p>Min: {resort.min_altitude_m ?? "N/A"} m</p>
-          <p>Max: {resort.max_altitude_m ?? "N/A"} m</p>
-          <p>Ski area: {resort.ski_area_name ?? "N/A"}</p>
-
-          {resort.latitude && resort.longitude && (
-            <p>
-              Coordinates: {resort.latitude}, {resort.longitude}
-            </p>
-          )}
+          <p>Continent: {continent ?? "N/A"}</p>
+          <p>Village altitude: {villageAltitude ?? "N/A"} m</p>
+          <p>Min altitude: {minAltitude ?? "N/A"} m</p>
+          <p>Max altitude: {maxAltitude ?? "N/A"} m</p>
+          <p>Ski area: {skiAreaName ?? "N/A"}</p>
+          <p>Ski area type: {skiAreaType ?? "N/A"}</p>
+          <p>Total slopes: {slopes.length}</p>
+          <p>Total lifts: {lifts.length}</p>
+          <p>
+            Coordinates:{" "}
+            {latitude != null && longitude != null ? `${latitude}, ${longitude}` : "N/A"}
+          </p>
         </div>
       </div>
 
@@ -72,7 +112,6 @@ export default function ResortPage() {
               <tr>
                 <th>Name</th>
                 <th>Difficulty</th>
-                <th></th>
               </tr>
             </thead>
 
@@ -80,13 +119,8 @@ export default function ResortPage() {
               {slopes.map((slope) => (
                 <tr key={slope.id}>
                   <td>{slope.name ?? "Unknown"}</td>
-
                   <td className={`difficulty ${slope.difficulty}`}>
-                    {slope.difficulty}
-                  </td>
-
-                  <td>
-                    <span className={`difficulty-dot ${slope.difficulty}`} />
+                    {slope.difficulty ?? "N/A"}
                   </td>
                 </tr>
               ))}
@@ -109,7 +143,7 @@ export default function ResortPage() {
               {lifts.map((lift) => (
                 <tr key={lift.id}>
                   <td>{lift.name ?? "Unnamed"}</td>
-                  <td>{lift.lift_type}</td>
+                  <td>{lift.lift_type ?? "N/A"}</td>
                 </tr>
               ))}
             </tbody>
