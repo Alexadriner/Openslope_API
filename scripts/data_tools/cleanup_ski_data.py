@@ -45,10 +45,18 @@ logger.setLevel(logging.INFO)
 # CHECKPOINT
 # =========================
 CHECKPOINT_DIR = ROOT_DIR / "checkpoints" / "cleanup"
-CHECKPOINT_FILE = "progress.txt"
+CHECKPOINT_FILE = "cleanup_progress.json"
+LAUNCHER_PROGRESS_FILE = "progress.txt"
 
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 CHECKPOINT_PATH = CHECKPOINT_DIR / CHECKPOINT_FILE
+LAUNCHER_PROGRESS_PATH = CHECKPOINT_DIR / LAUNCHER_PROGRESS_FILE
+
+
+def get_checkpoint_path(worker_id=None, total_workers=None):
+    if worker_id is not None and total_workers is not None:
+        return CHECKPOINT_DIR / f"cleanup_progress_worker_{worker_id}_of_{total_workers}.json"
+    return CHECKPOINT_PATH
 
 
 # =========================
@@ -263,19 +271,19 @@ def api_delete(path):
 # =========================
 # CHECKPOINT HELPERS
 # =========================
-def write_checkpoint(data):
+def write_checkpoint(data, path):
     """Schreibt Checkpoint atomar, um korrupte Dateien zu vermeiden."""
-    tmp_path = Path(f"{CHECKPOINT_PATH}.tmp")
+    tmp_path = Path(f"{path}.tmp")
 
     with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(data, f)
         f.flush()
         os.fsync(f.fileno())
 
-    os.replace(tmp_path, CHECKPOINT_PATH)
+    os.replace(tmp_path, path)
 
 
-def save_checkpoint(entity_type, index, entity_id):
+def save_checkpoint(entity_type, index, entity_id, path):
     data = {
         "entity_type": entity_type,
         "index": index,
@@ -283,52 +291,52 @@ def save_checkpoint(entity_type, index, entity_id):
         "timestamp": time.time(),
     }
 
-    write_checkpoint(data)
-    logger.debug(f"Checkpoint saved: {data}")
+    write_checkpoint(data, path)
+    logger.debug(f"Checkpoint saved to {path}: {data}")
 
 
-def load_checkpoint():
-    if not os.path.exists(CHECKPOINT_PATH):
+def load_checkpoint(path):
+    if not os.path.exists(path):
         return None
 
     try:
-        with open(CHECKPOINT_PATH, "r", encoding="utf-8") as f:
+        with open(path, "r", encoding="utf-8") as f:
             raw = f.read()
 
         if not raw.strip():
-            logger.warning("Checkpoint empty. Ignoring.")
+            logger.warning(f"Checkpoint {path} empty. Ignoring.")
             return None
 
         data = json.loads(raw)
 
         if not isinstance(data, dict):
-            logger.warning("Checkpoint has invalid format. Ignoring.")
+            logger.warning(f"Checkpoint {path} has invalid format. Ignoring.")
             return None
 
         required = {"entity_type", "index", "entity_id", "timestamp"}
         if not required.issubset(data.keys()):
-            logger.warning("Checkpoint missing required keys. Ignoring.")
+            logger.warning(f"Checkpoint {path} missing required keys. Ignoring.")
             return None
 
         return data
     except Exception as e:
-        logger.error(f"Checkpoint corrupted: {e}")
+        logger.error(f"Checkpoint {path} corrupted: {e}")
         return None
 
 
-def clear_checkpoint():
-    if os.path.exists(CHECKPOINT_PATH):
-        os.remove(CHECKPOINT_PATH)
-        logger.info("Checkpoint cleared")
+def clear_checkpoint(path):
+    if os.path.exists(path):
+        os.remove(path)
+        logger.info(f"Checkpoint {path} cleared")
 
 
-def save_phase(phase):
-    checkpoint = load_checkpoint()
+def save_phase(phase, path):
+    checkpoint = load_checkpoint(path)
     if not checkpoint:
         return
 
     checkpoint["phase"] = phase
-    write_checkpoint(checkpoint)
+    write_checkpoint(checkpoint, path)
 
 
 # =========================
@@ -523,11 +531,12 @@ def cleanup_entities(entities, resorts, entity_type, coord_index):
 # =========================
 # APPLY
 # =========================
-def apply_changes(valid, delete, entity_type, checkpoint=None, use_checkpoint=True):
+def apply_changes(valid, delete, entity_type, checkpoint=None, checkpoint_path=None):
     logger.info(f"Processing {entity_type}")
 
     start_index_update = 0
     start_index_delete = 0
+    use_checkpoint = checkpoint_path is not None
 
     def index_from_entity_id(items, entity_id):
         for idx, item in enumerate(items):
@@ -569,8 +578,8 @@ def apply_changes(valid, delete, entity_type, checkpoint=None, use_checkpoint=Tr
         e = valid[i]
 
         if use_checkpoint:
-            save_checkpoint(entity_type, i, e["id"])
-            save_phase("update")
+            save_checkpoint(entity_type, i, e["id"], checkpoint_path)
+            save_phase("update", checkpoint_path)
 
         logger.info(f"Updating {entity_type} ID={e['id']}")
         api_put(f"/{entity_type}/{e['id']}", e)
@@ -581,8 +590,8 @@ def apply_changes(valid, delete, entity_type, checkpoint=None, use_checkpoint=Tr
         e = delete[i]
 
         if use_checkpoint:
-            save_checkpoint(entity_type, i, e["id"])
-            save_phase("delete")
+            save_checkpoint(entity_type, i, e["id"], checkpoint_path)
+            save_phase("delete", checkpoint_path)
 
         logger.warning(f"Deleting {entity_type} ID={e['id']}")
         api_delete(f"/{entity_type}/{e['id']}")
@@ -609,15 +618,13 @@ def main():
     configure_logging(worker_id=worker_id if parallel_mode else None, total_workers=total_workers if parallel_mode else None)
     logger.info("=== Cleanup Script Started ===")
 
-    checkpoint = None
-    if parallel_mode:
-        logger.info(f"Parallel cleanup mode active (worker {worker_id}/{total_workers}). Checkpoint disabled.")
+    checkpoint_path = get_checkpoint_path(worker_id, total_workers)
+    checkpoint = load_checkpoint(checkpoint_path)
+
+    if checkpoint:
+        logger.warning(f"Resuming from checkpoint: {checkpoint}")
     else:
-        checkpoint = load_checkpoint()
-        if checkpoint:
-            logger.warning(f"Resuming from checkpoint: {checkpoint}")
-        else:
-            logger.info("No checkpoint found. Starting fresh.")
+        logger.info(f"No checkpoint found at {checkpoint_path}. Starting fresh.")
 
     coord_index = load_coordinate_index()
     resorts, lifts, slopes = load_all()
@@ -677,11 +684,10 @@ def main():
             delete,
             entity_type,
             entity_checkpoint,
-            use_checkpoint=not parallel_mode,
+            checkpoint_path=checkpoint_path,
         )
 
-    if not parallel_mode:
-        clear_checkpoint()
+    clear_checkpoint(checkpoint_path)
     logger.info("Cleanup finished successfully.")
 
 
