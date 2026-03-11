@@ -18,6 +18,8 @@ use routes::auth::{signup, signin, me};
 
 use actix_cors::Cors;
 
+use actix_web::web::JsonConfig;
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     dotenv().ok();

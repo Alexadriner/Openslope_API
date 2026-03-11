@@ -26,6 +26,7 @@ pub struct SlopeGeometry {
     pub start: CoordinatePoint,
     pub end: CoordinatePoint,
     pub path: Option<Vec<CoordinatePoint>>,
+    pub direction: Option<f64>,
 }
 
 #[derive(Serialize)]
@@ -87,6 +88,7 @@ pub struct CreateSlope {
     pub status_updated_at: Option<String>,
     pub status_source_url: Option<String>,
     pub slope_path_json: Option<String>,
+    pub direction: Option<f64>,
 }
 
 #[derive(Deserialize)]
@@ -115,6 +117,7 @@ pub struct UpdateSlope {
     pub status_updated_at: Option<String>,
     pub status_source_url: Option<String>,
     pub slope_path_json: Option<String>,
+    pub direction: Option<f64>,
 }
 
 fn parse_path_geojson(path_geojson: Option<String>) -> Option<Vec<CoordinatePoint>> {
@@ -160,6 +163,7 @@ pub async fn get_slopes(db: web::Data<MySqlPool>) -> impl Responder {
                CAST(lat_start AS DOUBLE) AS lat_start, CAST(lon_start AS DOUBLE) AS lon_start,
                CAST(lat_end AS DOUBLE) AS lat_end, CAST(lon_end AS DOUBLE) AS lon_end,
                CAST(path_geojson AS CHAR) AS path_geojson,
+               CAST(direction AS DOUBLE) AS direction,
                source_system, source_entity_id, operational_status, grooming_status, operational_note, status_source_url,
                DATE_FORMAT(status_updated_at, '%Y-%m-%dT%H:%i:%sZ') AS status_updated_at
         FROM slopes
@@ -189,6 +193,7 @@ pub async fn get_slopes(db: web::Data<MySqlPool>) -> impl Responder {
                             latitude: row.lat_end,
                             longitude: row.lon_end,
                         },
+                        direction: row.direction,
                         path: parse_path_geojson(row.path_geojson),
                     },
                     specs: SlopeSpecs {
@@ -233,6 +238,7 @@ pub async fn get_slope(db: web::Data<MySqlPool>, id: web::Path<i64>) -> impl Res
                CAST(lat_start AS DOUBLE) AS lat_start, CAST(lon_start AS DOUBLE) AS lon_start,
                CAST(lat_end AS DOUBLE) AS lat_end, CAST(lon_end AS DOUBLE) AS lon_end,
                CAST(path_geojson AS CHAR) AS path_geojson,
+               CAST(direction AS DOUBLE) AS direction,
                source_system, source_entity_id, operational_status, grooming_status, operational_note, status_source_url,
                DATE_FORMAT(status_updated_at, '%Y-%m-%dT%H:%i:%sZ') AS status_updated_at
         FROM slopes
@@ -261,6 +267,7 @@ pub async fn get_slope(db: web::Data<MySqlPool>, id: web::Path<i64>) -> impl Res
                     latitude: row.lat_end,
                     longitude: row.lon_end,
                 },
+                direction: row.direction,
                 path: parse_path_geojson(row.path_geojson),
             },
             specs: SlopeSpecs {
@@ -307,6 +314,7 @@ pub async fn get_slopes_by_resort(
                CAST(lat_start AS DOUBLE) AS lat_start, CAST(lon_start AS DOUBLE) AS lon_start,
                CAST(lat_end AS DOUBLE) AS lat_end, CAST(lon_end AS DOUBLE) AS lon_end,
                CAST(path_geojson AS CHAR) AS path_geojson,
+               CAST(direction AS DOUBLE) AS direction,
                source_system, source_entity_id, operational_status, grooming_status, operational_note, status_source_url,
                DATE_FORMAT(status_updated_at, '%Y-%m-%dT%H:%i:%sZ') AS status_updated_at
         FROM slopes
@@ -338,6 +346,7 @@ pub async fn get_slopes_by_resort(
                             latitude: row.lat_end,
                             longitude: row.lon_end,
                         },
+                        direction: row.direction,
                         path: parse_path_geojson(row.path_geojson),
                     },
                     specs: SlopeSpecs {
@@ -381,13 +390,13 @@ pub async fn create_slope(
         (resort_id, name, difficulty,
          length_m, vertical_drop_m, average_gradient, max_gradient,
          snowmaking, night_skiing, family_friendly, race_slope,
-         lat_start, lon_start, lat_end, lon_end, path_geojson,
+         lat_start, lon_start, lat_end, lon_end, path_geojson, direction,
          source_system, source_entity_id, name_normalized,
          operational_status, grooming_status, operational_note, status_updated_at, status_source_url)
         VALUES (?, ?, ?,
                 ?, ?, ?, ?,
                 ?, ?, ?, ?,
-                ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?,
                 ?, ?, ?,
                 ?, ?, ?, ?, ?)
         "#,
@@ -407,6 +416,7 @@ pub async fn create_slope(
         slope.lat_end,
         slope.lon_end,
         slope.slope_path_json,
+        slope.direction,
         slope.source_system.as_deref().unwrap_or("osm"),
         slope.source_entity_id,
         slope.name_normalized,
@@ -439,7 +449,7 @@ pub async fn update_slope(
         SET resort_id = ?, name = ?, difficulty = ?,
             length_m = ?, vertical_drop_m = ?, average_gradient = ?, max_gradient = ?,
             snowmaking = ?, night_skiing = ?, family_friendly = ?, race_slope = ?,
-            lat_start = ?, lon_start = ?, lat_end = ?, lon_end = ?, path_geojson = COALESCE(?, path_geojson),
+            lat_start = ?, lon_start = ?, lat_end = ?, lon_end = ?, path_geojson = COALESCE(?, path_geojson), direction = ?,
             source_system = ?, source_entity_id = ?, name_normalized = ?,
             operational_status = ?, grooming_status = ?, operational_note = ?, status_updated_at = ?, status_source_url = ?
         WHERE id = ?
@@ -460,6 +470,7 @@ pub async fn update_slope(
         slope.lat_end,
         slope.lon_end,
         slope.slope_path_json,
+        slope.direction,
         slope.source_system.as_deref().unwrap_or("osm"),
         slope.source_entity_id,
         slope.name_normalized,
