@@ -62,6 +62,32 @@
   background-color: rgba(110, 204, 57, 0.9);
 }
 
+.slope-direction-icon {
+  background: transparent;
+  border: none;
+}
+
+.slope-direction-arrow {
+  width: 20px;
+  height: 20px;
+  background-color: rgba(255, 255, 255, 0.9);
+  border: 2px solid #333;
+  border-radius: 50%;
+  position: relative;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.slope-direction-arrow::after {
+  content: "→";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 12px;
+  color: #333;
+  font-weight: bold;
+}
+
 @media (max-width: 900px) {
   .ski-map-canvas {
     height: 68vh;

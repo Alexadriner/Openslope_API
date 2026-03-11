@@ -75,6 +75,40 @@ function createLineEntry(startLat, startLon, endLat, endLon, style) {
   };
 }
 
+function createGeoJsonEntry(geoJsonData, style) {
+  if (!geoJsonData || !geoJsonData.features || geoJsonData.features.length === 0) {
+    return null;
+  }
+
+  const layer = L.geoJSON(geoJsonData, {
+    style: style,
+    onEachFeature: function (feature, layer) {
+      if (feature.properties && feature.properties.direction) {
+        const direction = feature.properties.direction;
+        const latlngs = layer.getLatLngs();
+        if (latlngs && latlngs.length > 0) {
+          const midPoint = latlngs[Math.floor(latlngs.length / 2)];
+          L.marker(midPoint, {
+            icon: L.divIcon({
+              className: 'slope-direction-icon',
+              html: `<div class="slope-direction-arrow" style="transform: rotate(${direction}deg)"></div>`,
+              iconSize: [20, 20],
+              iconAnchor: [10, 10]
+            })
+          }).addTo(layer);
+          layer.bindPopup(`Direction: ${direction}°`);
+        }
+      }
+    }
+  });
+
+  const bounds = layer.getBounds();
+  return {
+    layer,
+    bounds: bounds.isValid() ? bounds : null
+  };
+}
+
 function createResortPopupHtml(resort) {
   const resortName = resort.name ?? "Unknown resort";
   const detailHref = `/resort/${encodeURIComponent(resortName)}`;
@@ -140,19 +174,44 @@ function prepareResort(resort) {
     .filter(Boolean);
 
   const slopes = (resort.slopes ?? [])
-    .map((slope) =>
-      createLineEntry(
-        slope.geometry?.start?.latitude ?? slope.lat_start,
-        slope.geometry?.start?.longitude ?? slope.lon_start,
-        slope.geometry?.end?.latitude ?? slope.lat_end,
-        slope.geometry?.end?.longitude ?? slope.lon_end,
-        {
+    .map((slope) => {
+      // Check if GeoJSON data is available
+      if (slope.geometry?.path && slope.geometry.path.length > 0) {
+        // Create GeoJSON data structure
+        const geoJsonData = {
+          type: "FeatureCollection",
+          features: [{
+            type: "Feature",
+            properties: {
+              direction: slope.geometry.direction
+            },
+            geometry: {
+              type: "LineString",
+              coordinates: slope.geometry.path.map(point => [point.longitude, point.latitude])
+            }
+          }]
+        };
+
+        return createGeoJsonEntry(geoJsonData, {
           color: getSlopeColor(slope.difficulty ?? slope.display?.difficulty),
           weight: 2.2,
           opacity: 0.95,
-        }
-      )
-    )
+        });
+      } else {
+        // Fallback to line entry if no GeoJSON data
+        return createLineEntry(
+          slope.geometry?.start?.latitude ?? slope.lat_start,
+          slope.geometry?.start?.longitude ?? slope.lon_start,
+          slope.geometry?.end?.latitude ?? slope.lat_end,
+          slope.geometry?.end?.longitude ?? slope.lon_end,
+          {
+            color: getSlopeColor(slope.difficulty ?? slope.display?.difficulty),
+            weight: 2.2,
+            opacity: 0.95,
+          }
+        );
+      }
+    })
     .filter(Boolean);
 
   return {
