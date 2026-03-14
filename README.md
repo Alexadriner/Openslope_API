@@ -486,7 +486,3 @@ For some resorts, live status data (lift status, snow conditions, etc.) is addit
 ## ⚠️ Disclaimer
 
 This project is **not intended for public use or deployment**. The backend relies on a private database that is not publicly accessible. The repository exists solely to showcase the project's architecture and code.
-
-## ⚠️ Disclaimer
-
-This project is **not intended for public use or deployment**. The backend relies on a private database that is not publicly accessible. The repository exists solely to showcase the project's architecture and code.
