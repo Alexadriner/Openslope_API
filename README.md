@@ -479,7 +479,13 @@ Returns all lifts belonging to a specific resort.
 
 Resort data is sourced from [OpenSkiMap](https://openskimap.org/), a community-driven, open-source project based on OpenStreetMap data. The scraper fetches this data, which is then cleaned, normalized, and stored in a private database. The `ski-resorts.csv` in this repository serves as an example snapshot. Temporary files (prefixed with `tmp_`) are generated during the scraping process.
 
+For some resorts, live status data (lift status, snow conditions, etc.) is additionally sourced directly from the resort's own website or API. In these cases, the data source is indicated in the `sources.status_provider` field of the resort object as well as in the corresponding API response.
+
 ---
+
+## ⚠️ Disclaimer
+
+This project is **not intended for public use or deployment**. The backend relies on a private database that is not publicly accessible. The repository exists solely to showcase the project's architecture and code.
 
 ## ⚠️ Disclaimer
 
