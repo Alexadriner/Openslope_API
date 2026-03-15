@@ -86,6 +86,13 @@ LOG_LEVEL              = logging.INFO                  # <-- logging.DEBUG / INF
 LOG_TO_FILE            = False                         # <-- True to also write logs to a file
 LOG_FILE_PATH          = "logs/collect_geojson.log"   # <-- log file path (if LOG_TO_FILE=True)
 
+# Debug option for unbenannte Pisten
+DEBUG_UNNAMED_SLOPES    = True                         # <-- Set to True to enable debug logging for unnamed slopes
+
+# Configuration for nearest neighbor matching
+NEAREST_NEIGHBOR_MAX_DISTANCE_KM = 10.0                 # Maximum distance in km for nearest neighbor matching
+COORDINATE_TOLERANCE_KM          = 2.0                  # Tolerance in km for coordinate matching
+
 # Derived endpoints (no need to change these unless your API routes differ)
 SLOPES_ENDPOINT  = f"{OWN_API_BASE_URL}/slopes"
 RESORTS_ENDPOINT = f"{OWN_API_BASE_URL}/resorts"
@@ -129,6 +136,192 @@ def _setup_logger() -> logging.Logger:
 
 
 log = _setup_logger()
+
+
+# ---------------------------------------------------------------------------
+# Configuration Override for Worker Mode
+# ---------------------------------------------------------------------------
+
+def override_config_for_worker(worker_id: int, total_workers: int):
+    """
+    Override configuration when running in worker mode to avoid conflicts.
+    - Disable file logging to prevent multiple workers writing to same file
+    - Adjust timeouts for better performance under load
+    """
+    global LOG_TO_FILE, LOG_LEVEL
+    
+    # Disable file logging in worker mode to prevent conflicts
+    LOG_TO_FILE = False
+    
+    # Reduce log level for workers to reduce noise (optional)
+    # LOG_LEVEL = logging.WARNING
+    
+    log.info(f"Worker {worker_id}/{total_workers} - Configuration adjusted for parallel execution")
+
+
+# ---------------------------------------------------------------------------
+# HTTP Session Management
+# ---------------------------------------------------------------------------
+
+import requests.adapters
+from urllib3.util.retry import Retry
+import time
+
+def create_session_with_retries():
+    """Create a requests session with retry strategy for better reliability."""
+    session = requests.Session()
+    retry_strategy = Retry(
+        total=5,  # Increased retries
+        backoff_factor=2,  # Increased backoff
+        status_forcelist=[429, 500, 502, 503, 504, 408],  # Added 408 timeout
+        allowed_methods=["HEAD", "GET", "OPTIONS", "POST", "PUT"]
+    )
+    adapter = requests.adapters.HTTPAdapter(max_retries=retry_strategy)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    return session
+
+
+# Use session for all requests
+SESSION = create_session_with_retries()
+
+
+# ---------------------------------------------------------------------------
+# Enhanced API Functions with Better Error Handling
+# ---------------------------------------------------------------------------
+
+def load_ski_areas_from_api() -> list[dict]:
+    """Load all resorts from own API via GET /resorts with enhanced error handling."""
+    log.info("Loading ski areas from own API (%s) ...", RESORTS_ENDPOINT)
+    try:
+        # Add delay to prevent overwhelming the server
+        time.sleep(0.5)
+        response = SESSION.get(RESORTS_ENDPOINT, headers=HEADERS, timeout=30)  # Increased timeout
+        response.raise_for_status()
+        resorts = response.json()
+        log.info("  -> %d ski areas loaded.", len(resorts))
+        return resorts
+    except requests.RequestException as e:
+        log.error("Could not load resorts: %s", e)
+        return []
+
+
+def load_slopes_from_api() -> list[dict]:
+    """Load all slopes from own API via GET /slopes with enhanced error handling."""
+    log.info("Loading all slopes from own API (%s) ...", SLOPES_ENDPOINT)
+    try:
+        # Add delay to prevent overwhelming the server
+        time.sleep(0.5)
+        response = SESSION.get(SLOPES_ENDPOINT, headers=HEADERS, timeout=30)  # Increased timeout
+        response.raise_for_status()
+        slopes = response.json()
+        log.info("  -> %d slopes loaded.", len(slopes))
+        return slopes
+    except requests.RequestException as e:
+        log.error("API unreachable: %s", e)
+        return []
+
+
+def fetch_slope_difficulty(slope_id) -> Optional[str]:
+    """
+    Fetch a single slope from own API to retrieve its difficulty with enhanced error handling.
+    Returns the difficulty string if valid, otherwise None.
+    """
+    try:
+        # Add delay to prevent overwhelming the server
+        time.sleep(0.1)
+        response = SESSION.get(f"{SLOPES_ENDPOINT}/{slope_id}", headers=HEADERS, timeout=15)  # Increased timeout
+        response.raise_for_status()
+        data       = response.json()
+        difficulty = data.get("display", {}).get("difficulty")
+        if difficulty in VALID_DIFFICULTIES:
+            return difficulty
+        log.warning("Slope %s has no valid difficulty in display.difficulty: %s", slope_id, difficulty)
+        return None
+    except requests.RequestException as e:
+        log.error("GET slope %s failed: %s", slope_id, e)
+        return None
+
+
+def save_slope(api_slope: dict, geojson_feature: dict, direction: Optional[float]) -> bool:
+    """
+    Send a full UpdateSlope payload via PUT /slopes/{id} with enhanced error handling.
+    - slope_path_json: serialized GeoJSON LineString geometry string
+    - direction:       azimuth in degrees (null if not available)
+    - All other fields are taken from the existing API slope to avoid overwriting with nulls.
+    """
+    slope_id = api_slope["id"]
+    url      = f"{SLOPES_ENDPOINT}/{slope_id}"
+
+    # Serialize path as array of {latitude, longitude} objects
+    # matching the format expected by parse_path_geojson() in the Rust API
+    coords = geojson_feature["geometry"]["coordinates"]
+    path_points = [{"latitude": c[1], "longitude": c[0]} for c in coords]
+    path_geojson_str = json.dumps(path_points) if path_points else None
+
+    # Extract start/end from GeoJSON coordinates
+    coords    = geojson_feature["geometry"]["coordinates"]
+    lat_start = coords[0][1]  if coords else None
+    lon_start = coords[0][0]  if coords else None
+    lat_end   = coords[-1][1] if coords else None
+    lon_end   = coords[-1][0] if coords else None
+
+    # resort_id and difficulty are required (non-Option) in UpdateSlope struct
+    resort_id  = api_slope.get("resort_id")
+    difficulty = api_slope.get("difficulty")
+
+    if not resort_id:
+        log.warning("Slope %s has no resort_id - skipping.", slope_id)
+        return False
+
+    # difficulty must be a valid enum value - fetch from API if missing
+    if difficulty not in VALID_DIFFICULTIES:
+        log.debug("Slope %s has no valid difficulty (%s) - fetching from API ...", slope_id, difficulty)
+        difficulty = fetch_slope_difficulty(slope_id)
+        if difficulty is None:
+            log.warning("Slope %s has no valid difficulty - skipping.", slope_id)
+            return False
+
+    payload = {
+        "resort_id":          resort_id,
+        "name":               api_slope.get("name"),
+        "difficulty":         difficulty,
+        "length_m":           api_slope.get("length_m"),
+        "vertical_drop_m":    api_slope.get("vertical_drop_m"),
+        "average_gradient":   api_slope.get("average_gradient"),
+        "max_gradient":       api_slope.get("max_gradient"),
+        "snowmaking":         api_slope.get("snowmaking", False),
+        "night_skiing":       api_slope.get("night_skiing", False),
+        "family_friendly":    api_slope.get("family_friendly", False),
+        "race_slope":         api_slope.get("race_slope", False),
+        "lat_start":          lat_start or api_slope.get("lat_start"),
+        "lon_start":          lon_start or api_slope.get("lon_start"),
+        "lat_end":            lat_end   or api_slope.get("lat_end"),
+        "lon_end":            lon_end   or api_slope.get("lon_end"),
+        "slope_path_json":    path_geojson_str,
+        "direction":          direction,
+        "source_system":      api_slope.get("source_system", "osm"),
+        "source_entity_id":   api_slope.get("source_entity_id"),
+        "name_normalized":    api_slope.get("name_normalized"),
+        "operational_status": api_slope.get("operational_status", "unknown"),
+        "grooming_status":    api_slope.get("grooming_status", "unknown"),
+        "operational_note":   api_slope.get("operational_note"),
+        "status_updated_at":  api_slope.get("status_updated_at"),
+        "status_source_url":  api_slope.get("status_source_url"),
+    }
+
+    try:
+        # Add delay to prevent overwhelming the server
+        time.sleep(0.2)
+        response = SESSION.put(url, json=payload, headers=HEADERS, timeout=15)  # Increased timeout
+        if not response.ok:
+            log.error("PUT slope %s -> %s | body sent: %s", slope_id, response.status_code, json.dumps(payload, default=str))
+        response.raise_for_status()
+        log.debug("Slope %s saved (GeoJSON + direction).", slope_id)
+        return True
+    except requests.RequestException as e:
+        log.error("PUT slope failed for ID %s: %s", slope_id, e)
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -375,18 +568,332 @@ def _parse_overpass_response(data: dict) -> list[dict]:
 def filter_known_slopes(
     osm_slopes: list[dict],
     api_index:  dict[str, dict],
+    api_slopes: list[dict],
 ) -> list[tuple[dict, dict]]:
     """
-    Return only OSM slopes that also exist in own API (matched by name).
+    Return only OSM slopes that also exist in own API.
+    For auto-generated names like "[difficulty] slope [coordinates]", match by coordinates and difficulty.
+    For regular names, match by name.
+    For unmatched unbenannte Pisten, find nearest matching slopes with same difficulty.
     Returns a list of (osm_slope, api_slope) tuples.
     """
-    matches = [
-        (osm, api_index[_normalize_name(osm["name"])])
-        for osm in osm_slopes
-        if _normalize_name(osm["name"]) in api_index
-    ]
+    matches = []
+    
+    # Build coordinate-based index for auto-generated slopes
+    coord_index = {}
+    for api_slope in api_slopes:
+        name = api_slope.get("name", "")
+        # Check if this is an auto-generated name
+        if _is_auto_generated_name(name):
+            start_coords = _get_start_coords(api_slope)
+            end_coords = _get_end_coords(api_slope)
+            difficulty = _get_difficulty(api_slope)
+            
+            if start_coords and end_coords and difficulty:
+                # Create a key based on start/end coordinates and difficulty
+                key = f"{difficulty}_{start_coords[0]:.4f}_{start_coords[1]:.4f}_{end_coords[0]:.4f}_{end_coords[1]:.4f}"
+                coord_index[key] = api_slope
+    
+    # Build difficulty-based index for nearest neighbor matching
+    difficulty_index = {}
+    for api_slope in api_slopes:
+        difficulty = _get_difficulty(api_slope)
+        if difficulty:
+            if difficulty not in difficulty_index:
+                difficulty_index[difficulty] = []
+            start_coords = _get_start_coords(api_slope)
+            end_coords = _get_end_coords(api_slope)
+            if start_coords and end_coords:
+                difficulty_index[difficulty].append({
+                    'slope': api_slope,
+                    'start': start_coords,
+                    'end': end_coords
+                })
+    
+    # Debug logging for coordinate matching
+    if DEBUG_UNNAMED_SLOPES:
+        log.info("  DEBUG: Coordinate index built with %d entries", len(coord_index))
+        log.info("  DEBUG: Difficulty index built with %d difficulties", len(difficulty_index))
+    
+    for osm_slope in osm_slopes:
+        osm_name = osm_slope["name"]
+        osm_difficulty = osm_slope["difficulty"]
+        osm_coords = osm_slope["coordinates"]
+        
+        # Check if OSM slope has auto-generated name pattern
+        if _is_auto_generated_name(osm_name):
+            osm_start = osm_coords[0] if osm_coords else None
+            osm_end = osm_coords[-1] if osm_coords else None
+            
+            if osm_start and osm_end:
+                # Try exact coordinate match first
+                key = f"{osm_difficulty}_{osm_start[0]:.4f}_{osm_start[1]:.4f}_{osm_end[0]:.4f}_{osm_end[1]:.4f}"
+                if key in coord_index:
+                    matches.append((osm_slope, coord_index[key]))
+                    if DEBUG_UNNAMED_SLOPES:
+                        log.info("  DEBUG: Exact coordinate match found for OSM slope '%s'", osm_name)
+                    continue
+                elif DEBUG_UNNAMED_SLOPES:
+                    log.info("  DEBUG: No exact coordinate match for OSM slope '%s' (key: %s)", osm_name, key)
+                
+                # Try tolerance-based coordinate matching
+                tolerance_match = _find_tolerance_match(osm_start, osm_end, osm_difficulty, coord_index, COORDINATE_TOLERANCE_KM)
+                if tolerance_match:
+                    matches.append((osm_slope, tolerance_match))
+                    if DEBUG_UNNAMED_SLOPES:
+                        log.info("  DEBUG: Tolerance-based coordinate match found for OSM slope '%s'", osm_name)
+                    continue
+                elif DEBUG_UNNAMED_SLOPES:
+                    log.info("  DEBUG: No tolerance-based coordinate match for OSM slope '%s'", osm_name)
+                
+                # NEW: Try nearest neighbor matching for unbenannte Pisten
+                nearest_match = _find_nearest_neighbor_match(osm_start, osm_end, osm_difficulty, difficulty_index, NEAREST_NEIGHBOR_MAX_DISTANCE_KM)
+                if nearest_match:
+                    matches.append((osm_slope, nearest_match))
+                    if DEBUG_UNNAMED_SLOPES:
+                        log.info("  DEBUG: Nearest neighbor match found for OSM slope '%s' (distance: %.2f km)", 
+                                osm_name, _calculate_distance(osm_start, osm_end, nearest_match))
+                    continue
+                elif DEBUG_UNNAMED_SLOPES:
+                    log.info("  DEBUG: No nearest neighbor match for OSM slope '%s'", osm_name)
+                
+                # Fallback: Try matching with any difficulty if nearest neighbor fails
+                fallback_match = _find_fallback_match(osm_start, osm_end, osm_difficulty, difficulty_index, 20.0)
+                if fallback_match:
+                    matches.append((osm_slope, fallback_match))
+                    if DEBUG_UNNAMED_SLOPES:
+                        log.info("  DEBUG: Fallback match found for OSM slope '%s' (distance: %.2f km)", 
+                                osm_name, _calculate_distance(osm_start, osm_end, fallback_match))
+                    continue
+                elif DEBUG_UNNAMED_SLOPES:
+                    log.info("  DEBUG: No fallback match for OSM slope '%s'", osm_name)
+        
+        # Fallback to name-based matching for regular names
+        normalized_name = _normalize_name(osm_name)
+        if normalized_name in api_index:
+            matches.append((osm_slope, api_index[normalized_name]))
+            if DEBUG_UNNAMED_SLOPES:
+                log.info("  DEBUG: Name match found for OSM slope '%s'", osm_name)
+        elif DEBUG_UNNAMED_SLOPES:
+            log.info("  DEBUG: No match found for OSM slope '%s'", osm_name)
+    
     log.debug("%d / %d OSM slopes matched with own API.", len(matches), len(osm_slopes))
     return matches
+
+
+def _find_tolerance_match(osm_start, osm_end, osm_difficulty, coord_index, tolerance_km=0.5):
+    """
+    Find a coordinate match within tolerance distance.
+    Returns the matching API slope if found, otherwise None.
+    """
+    for key, api_slope in coord_index.items():
+        # Parse the key to get API coordinates and difficulty
+        parts = key.split("_")
+        if len(parts) != 5:
+            continue
+            
+        api_difficulty = parts[0]
+        try:
+            api_start_lon = float(parts[1])
+            api_start_lat = float(parts[2])
+            api_end_lon = float(parts[3])
+            api_end_lat = float(parts[4])
+        except ValueError:
+            continue
+        
+        # Check difficulty match first
+        if api_difficulty != osm_difficulty:
+            continue
+        
+        # Check if start coordinates are within tolerance
+        start_distance = _haversine_distance(osm_start[1], osm_start[0], api_start_lat, api_start_lon)
+        if start_distance > tolerance_km * 1000:  # Convert km to meters
+            continue
+            
+        # Check if end coordinates are within tolerance
+        end_distance = _haversine_distance(osm_end[1], osm_end[0], api_end_lat, api_end_lon)
+        if end_distance > tolerance_km * 1000:  # Convert km to meters
+            continue
+            
+        # Both start and end are within tolerance - this is a match!
+        return api_slope
+    
+    return None
+
+
+def _find_nearest_neighbor_match(osm_start, osm_end, osm_difficulty, difficulty_index, max_distance_km=5.0):
+    """
+    Find the nearest matching slope with the same difficulty for unbenannte Pisten.
+    Returns the closest matching API slope if found within max_distance_km, otherwise None.
+    """
+    if osm_difficulty not in difficulty_index:
+        return None
+    
+    candidates = difficulty_index[osm_difficulty]
+    if not candidates:
+        return None
+    
+    best_match = None
+    best_distance = float('inf')
+    
+    for candidate in candidates:
+        api_slope = candidate['slope']
+        api_start = candidate['start']
+        api_end = candidate['end']
+        
+        # Calculate distances between start points
+        start_distance = _haversine_distance(osm_start[1], osm_start[0], api_start[1], api_start[0])
+        
+        # Calculate distances between end points
+        end_distance = _haversine_distance(osm_end[1], osm_end[0], api_end[1], api_end[0])
+        
+        # Use maximum of start and end distances as the matching criterion
+        # This ensures both endpoints are reasonably close
+        max_endpoint_distance = max(start_distance, end_distance)
+        
+        # Update best match if this candidate is closer
+        if max_endpoint_distance < best_distance:
+            best_distance = max_endpoint_distance
+            best_match = api_slope
+    
+    # Only return match if within the maximum allowed distance
+    if best_match and best_distance <= max_distance_km * 1000:  # Convert km to meters
+        return best_match
+    
+    return None
+
+
+def _find_fallback_match(osm_start, osm_end, osm_difficulty, difficulty_index, max_distance_km=20.0):
+    """
+    Fallback matching that tries to find any slope within a very large radius,
+    regardless of exact difficulty match. This helps with cases where:
+    1. API has different difficulty classification
+    2. OSM has "unknown" difficulty
+    3. Coordinates are significantly different
+    """
+    # Try all difficulties if exact match fails
+    all_candidates = []
+    for diff, candidates in difficulty_index.items():
+        all_candidates.extend(candidates)
+    
+    if not all_candidates:
+        return None
+    
+    best_match = None
+    best_distance = float('inf')
+    
+    for candidate in all_candidates:
+        api_slope = candidate['slope']
+        api_start = candidate['start']
+        api_end = candidate['end']
+        
+        # Calculate distances between start points
+        start_distance = _haversine_distance(osm_start[1], osm_start[0], api_start[1], api_start[0])
+        
+        # Calculate distances between end points
+        end_distance = _haversine_distance(osm_end[1], osm_end[0], api_end[1], api_end[0])
+        
+        # Use maximum of start and end distances as the matching criterion
+        max_endpoint_distance = max(start_distance, end_distance)
+        
+        # Update best match if this candidate is closer
+        if max_endpoint_distance < best_distance:
+            best_distance = max_endpoint_distance
+            best_match = api_slope
+    
+    # Use much larger distance threshold for fallback
+    if best_match and best_distance <= max_distance_km * 1000:  # 20km threshold
+        return best_match
+    
+    return None
+
+
+def _calculate_distance(osm_start, osm_end, api_slope):
+    """
+    Calculate the average distance between OSM and API slope endpoints for logging purposes.
+    """
+    api_start = _get_start_coords(api_slope)
+    api_end = _get_end_coords(api_slope)
+    
+    if not api_start or not api_end:
+        return float('inf')
+    
+    start_distance = _haversine_distance(osm_start[1], osm_start[0], api_start[1], api_start[0])
+    end_distance = _haversine_distance(osm_end[1], osm_end[0], api_end[1], api_end[0])
+    
+    return (start_distance + end_distance) / 2000.0  # Return in km
+
+
+def _is_auto_generated_name(name: str) -> bool:
+    """Check if a slope name follows the auto-generated pattern."""
+    if not name:
+        return False
+    
+    name_lower = name.lower().strip()
+    
+    # Check for various patterns of auto-generated names
+    import re
+    
+    # Pattern 1: "blue slope [45.1234,7.5678]" or "red slope [45.1234, 7.5678]"
+    pattern1 = r'^(green|blue|red|black)\s+slope\s*\[\s*-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?\s*\]$'
+    
+    # Pattern 2: "easy slope [45.1234,7.5678]" or "intermediate slope [45.1234, 7.5678]"
+    pattern2 = r'^(easy|intermediate|advanced|novice)\s+slope\s*\[\s*-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?\s*\]$'
+    
+    # Pattern 3: "blue slope [45.1234,7.5678]" or "red slope [45.1234, 7.5678]" (with different difficulty names)
+    pattern3 = r'^(green|blue|red|black)\s+slope\s*\[\s*-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?\s*\]$'
+    
+    # Pattern 4: "intermediate slope [46.7122,12.3713]" (from debug output)
+    pattern4 = r'^(intermediate|easy|advanced|novice)\s+slope\s*\[\s*-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?\s*\]$'
+    
+    return bool(re.match(pattern1, name_lower) or re.match(pattern2, name_lower) or re.match(pattern3, name_lower) or re.match(pattern4, name_lower))
+
+
+def _get_start_coords(api_slope: dict) -> Optional[tuple[float, float]]:
+    """Extract start coordinates from API slope."""
+    geometry = api_slope.get("geometry", {})
+    start = geometry.get("start")
+    if start and start.get("latitude") is not None and start.get("longitude") is not None:
+        return (float(start["longitude"]), float(start["latitude"]))
+    
+    # Fallback to lat_start/lon_start
+    lat_start = api_slope.get("lat_start")
+    lon_start = api_slope.get("lon_start")
+    if lat_start is not None and lon_start is not None:
+        return (float(lon_start), float(lat_start))
+    
+    return None
+
+
+def _get_end_coords(api_slope: dict) -> Optional[tuple[float, float]]:
+    """Extract end coordinates from API slope."""
+    geometry = api_slope.get("geometry", {})
+    end = geometry.get("end")
+    if end and end.get("latitude") is not None and end.get("longitude") is not None:
+        return (float(end["longitude"]), float(end["latitude"]))
+    
+    # Fallback to lat_end/lon_end
+    lat_end = api_slope.get("lat_end")
+    lon_end = api_slope.get("lon_end")
+    if lat_end is not None and lon_end is not None:
+        return (float(lon_end), float(lat_end))
+    
+    return None
+
+
+def _get_difficulty(api_slope: dict) -> Optional[str]:
+    """Extract difficulty from API slope."""
+    difficulty = api_slope.get("difficulty")
+    if difficulty:
+        return difficulty.lower().strip()
+    
+    # Try display.difficulty
+    display = api_slope.get("display", {})
+    difficulty = display.get("difficulty")
+    if difficulty:
+        return difficulty.lower().strip()
+    
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -464,6 +971,79 @@ def extract_direction(waypoints: list[list[float]]) -> Optional[float]:
     y = math.cos(lat1) * math.sin(lat2) - math.sin(lat1) * math.cos(lat2) * math.cos(d_lon)
 
     return round((math.degrees(math.atan2(x, y)) + 360) % 360, 2)
+
+
+def interpolate_waypoints(waypoints: list[list[float]], max_distance_m: float = 50.0) -> list[list[float]]:
+    """
+    Interpolate additional waypoints to ensure maximum distance between points.
+    This creates more detailed GeoJSON with smaller segments.
+    
+    Args:
+        waypoints: Original list of [lon, lat] coordinates
+        max_distance_m: Maximum distance in meters between consecutive points
+    
+    Returns:
+        List of interpolated waypoints with higher density
+    """
+    if len(waypoints) < 2:
+        return waypoints
+    
+    interpolated = [waypoints[0]]
+    
+    for i in range(1, len(waypoints)):
+        start = waypoints[i-1]
+        end = waypoints[i]
+        
+        # Calculate distance between current points
+        distance = _haversine_distance(start[1], start[0], end[1], end[0])
+        
+        # If distance is too large, interpolate additional points
+        if distance > max_distance_m:
+            num_points = math.ceil(distance / max_distance_m)
+            
+            for j in range(1, num_points):
+                ratio = j / num_points
+                
+                # Linear interpolation
+                lat = start[1] + (end[1] - start[1]) * ratio
+                lon = start[0] + (end[0] - start[0]) * ratio
+                
+                interpolated.append([lon, lat])
+        
+        interpolated.append(end)
+    
+    return interpolated
+
+
+def _haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """
+    Calculate the great circle distance between two points on Earth.
+    
+    Args:
+        lat1, lon1: Latitude and longitude of first point in degrees
+        lat2, lon2: Latitude and longitude of second point in degrees
+    
+    Returns:
+        Distance in meters
+    """
+    # Earth's radius in meters
+    R = 6371000.0
+    
+    # Convert to radians
+    lat1_rad = math.radians(lat1)
+    lon1_rad = math.radians(lon1)
+    lat2_rad = math.radians(lat2)
+    lon2_rad = math.radians(lon2)
+    
+    # Haversine formula
+    dlat = lat2_rad - lat1_rad
+    dlon = lon2_rad - lon1_rad
+    
+    a = (math.sin(dlat / 2) ** 2 + 
+         math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(dlon / 2) ** 2)
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    
+    return R * c
 
 
 # ---------------------------------------------------------------------------
@@ -553,25 +1133,41 @@ def save_slope(api_slope: dict, geojson_feature: dict, direction: Optional[float
 # Main pipeline
 # ---------------------------------------------------------------------------
 
-def collect_geojson() -> dict:
+def collect_geojson(worker_id: int = 0, total_workers: int = 1) -> dict:
     """
     Main entry point following the flowchart:
       1a. Load ski areas (resorts) from own API
       1b. Load slopes from own API
       2.  Per ski area: bounding box -> OSM query
       3.  Match OSM slopes against own API
-      4.  Extract GeoJSON + direction
-      5a. Save GeoJSON via PUT (direction included in properties)
-      5b. Save direction separately via extra PUT
+      4.  Interpolate waypoints for more detailed GeoJSON (max 50m spacing)
+      5.  Extract GeoJSON + direction
+      6a. Save GeoJSON via PUT (direction included in properties)
+      6b. Save direction separately via extra PUT
     """
+    # Override configuration for worker mode
+    override_config_for_worker(worker_id, total_workers)
+    
     log.info("=" * 60)
-    log.info("Starting GeoJSON collection")
+    log.info(f"Starting GeoJSON collection (Worker {worker_id}/{total_workers})")
     log.info("=" * 60)
 
     # --- Step 1a: Resorts ---
     ski_areas = load_ski_areas_from_api()
     if not ski_areas:
         log.error("No ski areas found in own API - aborting.")
+        return {"type": "FeatureCollection", "features": []}
+
+    # Filter ski areas by worker assignment
+    filtered_ski_areas = [
+        area for i, area in enumerate(ski_areas)
+        if i % total_workers == worker_id
+    ]
+    log.info(f"Worker {worker_id} assigned {len(filtered_ski_areas)} ski areas out of {len(ski_areas)} total.")
+    
+    # Early exit if no ski areas assigned to this worker
+    if not filtered_ski_areas:
+        log.info(f"Worker {worker_id} has no ski areas to process. Exiting early.")
         return {"type": "FeatureCollection", "features": []}
 
     # --- Step 1b: Slopes ---
@@ -586,7 +1182,7 @@ def collect_geojson() -> dict:
     all_features: list[dict] = []
 
     # --- Step 2: Per ski area ---
-    for ski_area in ski_areas:
+    for ski_area in filtered_ski_areas:
         name   = ski_area.get("name", f"Resort ID {ski_area.get('id', '?')}")
         center = _parse_resort_center(ski_area)
 
@@ -605,13 +1201,33 @@ def collect_geojson() -> dict:
         log.info("  -> %d OSM slopes found.", len(osm_slopes))
 
         # --- Step 3: Match ---
-        matches = filter_known_slopes(osm_slopes, api_index)
+        matches = filter_known_slopes(osm_slopes, api_index, api_slopes)
         log.info("  -> %d slopes matched with own API.", len(matches))
+
+        # Debug logging for matching process
+        if DEBUG_UNNAMED_SLOPES:
+            log.info("  DEBUG: OSM slopes found: %d", len(osm_slopes))
+            log.info("  DEBUG: API slopes in index: %d", len(api_index))
+            # Count auto-generated names in API slopes
+            auto_generated_count = sum(1 for name in api_index.keys() if _is_auto_generated_name(name))
+            log.info("  DEBUG: Auto-generated names in API: %d", auto_generated_count)
+
+        # Count unnamed slopes for debug summary
+        unnamed_count = 0
+        named_count = 0
 
         for osm_slope, api_slope_raw in matches:
             api_slope = _extract_slope_fields(api_slope_raw)
             slope_id  = api_slope["id"]
-            log.info("Processing slope: '%s' (ID=%s)", api_slope["name"], slope_id)
+            slope_name = api_slope["name"]
+            
+            # Debug logging for unnamed slopes
+            if DEBUG_UNNAMED_SLOPES and _is_auto_generated_name(slope_name):
+                log.info("DEBUG: Processing UNNAMED slope: '%s' (ID=%s)", slope_name, slope_id)
+                unnamed_count += 1
+            else:
+                log.info("Processing slope: '%s' (ID=%s)", slope_name, slope_id)
+                named_count += 1
 
             # Prefer OSM waypoints (more detailed), fall back to API geometry
             if has_waypoints(osm_slope):
@@ -622,17 +1238,24 @@ def collect_geojson() -> dict:
                 log.debug("  Waypoints from API geometry: %d points", len(waypoints))
 
             if not waypoints:
-                log.warning("  No waypoints for slope '%s' - skipping.", api_slope["name"])
+                log.warning("  No waypoints for slope '%s' - skipping.", slope_name)
                 continue
 
-            # --- Step 4: Direction + GeoJSON ---
-            direction = extract_direction(waypoints)
+            # --- Step 4: Interpolate waypoints for more detailed GeoJSON ---
+            # Ensure maximum distance of 50 meters between points
+            interpolated_waypoints = interpolate_waypoints(waypoints, max_distance_m=50.0)
+            if len(interpolated_waypoints) > len(waypoints):
+                log.info("  Interpolated %d waypoints to %d points for better detail", 
+                        len(waypoints), len(interpolated_waypoints))
+
+            # --- Step 5: Direction + GeoJSON ---
+            direction = extract_direction(interpolated_waypoints)
             if direction is not None:
                 log.info("  Direction: %.2f degrees", direction)
             else:
                 log.warning("  Direction not available (< 2 waypoints).")
 
-            geojson_feature = build_geojson_feature(api_slope, waypoints, direction)
+            geojson_feature = build_geojson_feature(api_slope, interpolated_waypoints, direction)
 
             # --- Step 5: PUT full slope (GeoJSON + direction) ---
             if save_slope(api_slope, geojson_feature, direction):
@@ -651,9 +1274,11 @@ def collect_geojson() -> dict:
     log.info("Done! %d slopes processed.", len(all_features))
     log.info("=" * 60)
 
-    with open("geojson_slopes.json", "w", encoding="utf-8") as f:
+    # Save worker-specific output
+    output_file = f"geojson_slopes_worker_{worker_id}.json"
+    with open(output_file, "w", encoding="utf-8") as f:
         json.dump(feature_collection, f, ensure_ascii=False, indent=2)
-    log.info("Local backup saved: geojson_slopes.json")
+    log.info("Local backup saved: %s", output_file)
 
     return feature_collection
 
