@@ -332,7 +332,8 @@ def load_ski_areas_from_api() -> list[dict]:
     """Load all resorts from own API via GET /resorts."""
     log.info("Loading ski areas from own API (%s) ...", RESORTS_ENDPOINT)
     try:
-        response = requests.get(RESORTS_ENDPOINT, headers=HEADERS, timeout=15)
+        # Use session with retries for better reliability
+        response = SESSION.get(RESORTS_ENDPOINT, headers=HEADERS, timeout=60)
         response.raise_for_status()
         resorts = response.json()
         log.info("  -> %d ski areas loaded.", len(resorts))
@@ -374,7 +375,8 @@ def load_slopes_from_api() -> list[dict]:
     """Load all slopes from own API via GET /slopes."""
     log.info("Loading all slopes from own API (%s) ...", SLOPES_ENDPOINT)
     try:
-        response = requests.get(SLOPES_ENDPOINT, headers=HEADERS, timeout=15)
+        # Use session with retries for better reliability
+        response = SESSION.get(SLOPES_ENDPOINT, headers=HEADERS, timeout=60)
         response.raise_for_status()
         slopes = response.json()
         log.info("  -> %d slopes loaded.", len(slopes))
@@ -393,7 +395,8 @@ def fetch_slope_difficulty(slope_id) -> Optional[str]:
     Returns the difficulty string if valid, otherwise None.
     """
     try:
-        response = requests.get(f"{SLOPES_ENDPOINT}/{slope_id}", headers=HEADERS, timeout=10)
+        # Use session with retries for better reliability
+        response = SESSION.get(f"{SLOPES_ENDPOINT}/{slope_id}", headers=HEADERS, timeout=30)
         response.raise_for_status()
         data       = response.json()
         difficulty = data.get("display", {}).get("difficulty")

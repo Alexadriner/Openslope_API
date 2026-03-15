@@ -94,6 +94,18 @@ PYTHON = sys.executable
 # =========================
 # PROGRESS MANAGEMENT
 # =========================
+def write_checkpoint(data, path):
+    """Schreibt Checkpoint atomar, um korrupte Dateien zu vermeiden."""
+    tmp_path = Path(f"{path}.tmp")
+
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(data, f)
+        f.flush()
+        os.fsync(f.fileno())
+
+    os.replace(tmp_path, path)
+
+
 def save_worker_progress(worker_id, processed_resorts):
     """Save progress for a specific worker."""
     CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
@@ -103,8 +115,7 @@ def save_worker_progress(worker_id, processed_resorts):
         "processed_resorts": processed_resorts,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
-    with open(progress_file, "w", encoding="utf-8") as f:
-        f.write(json.dumps(payload, ensure_ascii=True, indent=2))
+    write_checkpoint(payload, progress_file)
 
 
 def load_worker_progress(worker_id):
@@ -130,8 +141,7 @@ def save_launcher_progress(stage, status="running", last_value=None):
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "last_value": last_value,
     }
-    with open(PROGRESS_FILE, "w", encoding="utf-8") as f:
-        f.write(json.dumps(payload, ensure_ascii=True, indent=2))
+    write_checkpoint(payload, PROGRESS_FILE)
 
 
 def load_launcher_progress():
