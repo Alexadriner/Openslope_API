@@ -1050,6 +1050,34 @@ def _haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> f
 
 
 # ---------------------------------------------------------------------------
+# Progress Tracking Functions
+# ---------------------------------------------------------------------------
+
+def save_worker_progress(worker_id: int, processed_resorts: list) -> None:
+    """
+    Save the progress of a worker to a JSON file.
+    Uses atomic file operations to prevent corruption.
+    """
+    from pathlib import Path
+    import tempfile
+    
+    progress_file = Path("checkpoints") / "collect_geojson" / f"worker_{worker_id}_progress.json"
+    progress_file.parent.mkdir(parents=True, exist_ok=True)
+    
+    progress_data = {"processed_resorts": processed_resorts}
+    
+    try:
+        # Use atomic write to prevent corruption
+        temp_file = progress_file.with_suffix('.tmp')
+        with open(temp_file, 'w', encoding='utf-8') as f:
+            json.dump(progress_data, f, ensure_ascii=False, indent=2)
+        temp_file.rename(progress_file)
+        log.debug(f"Progress saved for worker {worker_id}: {len(processed_resorts)} resorts")
+    except Exception as e:
+        log.error(f"Failed to save progress for worker {worker_id}: {e}")
+
+
+# ---------------------------------------------------------------------------
 # Step 5: Save GeoJSON + direction via PUT /slopes/{id}
 # ---------------------------------------------------------------------------
 
@@ -1184,8 +1212,29 @@ def collect_geojson(worker_id: int = 0, total_workers: int = 1) -> dict:
 
     all_features: list[dict] = []
 
+    # --- Progress tracking ---
+    from pathlib import Path
+    progress_file = Path("checkpoints") / "collect_geojson" / f"worker_{worker_id}_progress.json"
+    progress_file.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Load existing progress
+    processed_resorts = set()
+    if progress_file.exists():
+        try:
+            with open(progress_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                processed_resorts = set(data.get("processed_resorts", []))
+                log.info(f"Resumed from checkpoint: {len(processed_resorts)} resorts already processed")
+        except (json.JSONDecodeError, KeyError):
+            log.warning("Could not load progress file, starting fresh")
+
     # --- Step 2: Per ski area ---
     for ski_area in filtered_ski_areas:
+        # Skip already processed resorts
+        resort_id = ski_area.get("id")
+        if resort_id in processed_resorts:
+            log.info(f"Skipping already processed resort: {ski_area.get('name', resort_id)}")
+            continue
         name   = ski_area.get("name", f"Resort ID {ski_area.get('id', '?')}")
         center = _parse_resort_center(ski_area)
 
@@ -1270,6 +1319,10 @@ def collect_geojson(worker_id: int = 0, total_workers: int = 1) -> dict:
 
         log.info("Moving to next ski area ...")
 
+        # Save progress after each resort
+        processed_resorts.add(resort_id)
+        save_worker_progress(worker_id, list(processed_resorts))
+
     # Assemble FeatureCollection
     feature_collection = {"type": "FeatureCollection", "features": all_features}
 
@@ -1291,5 +1344,25 @@ def collect_geojson(worker_id: int = 0, total_workers: int = 1) -> dict:
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    result = collect_geojson()
+    import sys
+    
+    # Parse command line arguments
+    worker_id = 0
+    total_workers = 1
+    
+    if len(sys.argv) >= 2:
+        try:
+            worker_id = int(sys.argv[1])
+        except ValueError:
+            log.error("Invalid worker_id argument. Using default (0).")
+    
+    if len(sys.argv) >= 3:
+        try:
+            total_workers = int(sys.argv[2])
+        except ValueError:
+            log.error("Invalid total_workers argument. Using default (1).")
+    
+    log.info(f"Script started with worker_id={worker_id}, total_workers={total_workers}")
+    
+    result = collect_geojson(worker_id, total_workers)
     log.info("Total result: %d features in FeatureCollection.", len(result["features"]))
