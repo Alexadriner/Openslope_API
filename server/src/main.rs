@@ -24,8 +24,8 @@ use actix_web::web::JsonConfig;
 async fn main() -> std::io::Result<()> {
     dotenv().ok();
 
-    let database_url =
-        env::var("DATABASE_URL").expect("DATABASE_URL not set");
+    let database_url = env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "mysql://username:password@Central.local:3306/openslope_db".to_string());
 
     let pool = MySqlPool::connect(&database_url)
         .await

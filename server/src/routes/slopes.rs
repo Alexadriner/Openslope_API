@@ -516,7 +516,7 @@ pub async fn delete_slopes_by_resort(
     db: web::Data<MySqlPool>,
     resort_id: web::Path<String>,
 ) -> impl Responder {
-    let result = sqlx::query!("DELETE FROM slopes WHERE resort_id = ?", resort_id.into_inner())
+    let result: Result<sqlx::mysql::MySqlQueryResult, sqlx::Error> = sqlx::query!("DELETE FROM slopes WHERE resort_id = ?", resort_id.into_inner())
         .execute(db.get_ref())
         .await;
 

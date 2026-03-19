@@ -165,7 +165,7 @@ where
 
             let reset_month = user
                 .last_request_month
-                .map(|d| d.year() != now.year() || d.month() != now.month())
+                .map(|d: time::Date| d.year() != now.year() || d.month() != now.month())
                 .unwrap_or(true);
 
             let mut req_min: u32 = if reset_minute { 0 } else { user.requests_minute } as u32;
@@ -196,7 +196,7 @@ where
             req_min += 1;
             req_mon += 1;
 
-            sqlx::query!(
+            let _: sqlx::mysql::MySqlQueryResult = sqlx::query!(
                 r#"
                 UPDATE users
                 SET
