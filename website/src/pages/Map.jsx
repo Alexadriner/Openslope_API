@@ -4,7 +4,7 @@ import "leaflet/dist/leaflet.css";
 import "leaflet.markercluster";
 import "leaflet.markercluster/dist/MarkerCluster.css";
 import "leaflet.markercluster/dist/MarkerCluster.Default.css";
-import { apiFetch } from "../api/client";
+import { fetchResortsForMap, fetchSlopesForMap, fetchLiftsForMap } from "../api/client";
 import "../stylesheets/base.css";
 import "../stylesheets/map.css";
 
@@ -299,7 +299,8 @@ export default function Map() {
       setError("");
 
       try {
-        const resorts = await apiFetch("/resorts");
+        // Load resorts optimized for map rendering
+        const resorts = await fetchResortsForMap();
         preparedResortsRef.current = resorts.map(prepareResort);
 
         const bounds = L.latLngBounds([]);

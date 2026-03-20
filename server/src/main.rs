@@ -41,6 +41,7 @@ async fn main() -> std::io::Result<()> {
                 .allow_any_origin()   // erlaubt Zugriff von jedem Frontend (für Entwicklung)
                 .allow_any_method()   // GET, POST, PUT, DELETE etc.
                 .allow_any_header()   // alle Header erlaubt
+                .supports_credentials() // erlaubt Cookies und Credentials
         )
         .app_data(web::Data::new(pool.clone()))
 

@@ -1,206 +1,124 @@
-import { useEffect, useMemo, useState } from "react";
+import { useState } from "react";
 import { apiFetch } from "../api/client";
-import "../stylesheets/base.css";
 import "../stylesheets/api-demo.css";
 
-const API_CONFIG = {
-  resorts: {
-    label: "Resorts API",
-    endpoint: "resorts",
-    idLabel: "Resort-ID",
-    idPlaceholder: "zermatt",
-  },
-  lifts: {
-    label: "Lifts API",
-    endpoint: "lifts",
-    idLabel: "Lift-ID",
-    idPlaceholder: "12",
-  },
-  slopes: {
-    label: "Slopes API",
-    endpoint: "slopes",
-    idLabel: "Slope-ID",
-    idPlaceholder: "18",
-  },
-};
-
-const PREVIEW_LIMIT = 5;
-
-function buildPreviewData(data) {
-  if (Array.isArray(data)) {
-    return {
-      shownItems: data.slice(0, PREVIEW_LIMIT),
-      totalItems: data.length,
-      isTruncated: data.length > PREVIEW_LIMIT,
-    };
-  }
-
-  return {
-    shownItems: data,
-    totalItems: 1,
-    isTruncated: false,
-  };
-}
-
 export default function ApiDemo() {
-  const [selectedApi, setSelectedApi] = useState("resorts");
-  const [inputValue, setInputValue] = useState("");
-  const [allIds, setAllIds] = useState([]);
-  const [responseData, setResponseData] = useState(null);
-  const [meta, setMeta] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  const [data, setData] = useState({});
+  const [loading, setLoading] = useState({});
+  const [error, setError] = useState({});
 
-  const config = API_CONFIG[selectedApi];
-  const trimmedInput = inputValue.trim();
-
-  const suggestions = useMemo(() => {
-    if (!trimmedInput) {
-      return [];
+  const fetchData = async (endpoint, key) => {
+    setLoading(prev => ({ ...prev, [key]: true }));
+    setError(prev => ({ ...prev, [key]: null }));
+    
+    try {
+      const result = await apiFetch(endpoint);
+      setData(prev => ({ ...prev, [key]: result }));
+    } catch (err) {
+      setError(prev => ({ ...prev, [key]: err.message }));
+    } finally {
+      setLoading(prev => ({ ...prev, [key]: false }));
     }
+  };
 
-    const lower = trimmedInput.toLowerCase();
-    return allIds.filter((id) => id.toLowerCase().includes(lower)).slice(0, 10);
-  }, [allIds, trimmedInput]);
-
-  const requestPath = trimmedInput
-    ? `${config.endpoint}/${encodeURIComponent(trimmedInput)}`
-    : config.endpoint;
-
-  const requestUrl = `http://localhost:8080/${requestPath}?api_key=<API_KEY>`;
-
-  useEffect(() => {
-    const controller = new AbortController();
-
-    async function runRequest() {
-      setLoading(true);
-      setError("");
-
-      try {
-        if (!trimmedInput) {
-          const list = await apiFetch(config.endpoint, { signal: controller.signal });
-          const ids = Array.isArray(list)
-            ? list
-                .map((item) => String(item?.id || "").trim())
-                .filter((id) => id.length > 0)
-            : [];
-          const preview = buildPreviewData(list);
-
-          setAllIds(ids);
-          setResponseData(preview.shownItems);
-          setMeta({
-            isList: true,
-            totalItems: preview.totalItems,
-            isTruncated: preview.isTruncated,
-          });
-          return;
-        }
-
-        const detail = await apiFetch(
-          `${config.endpoint}/${encodeURIComponent(trimmedInput)}`,
-          { signal: controller.signal },
-        );
-
-        setMeta({
-          isList: false,
-          totalItems: 1,
-          isTruncated: false,
-        });
-        setResponseData(detail);
-      } catch (requestError) {
-        if (requestError?.name === "AbortError") {
-          return;
-        }
-
-        setResponseData(null);
-        setMeta(null);
-        setError(requestError?.message || "API request failed.");
-      } finally {
-        setLoading(false);
-      }
+  const apiEndpoints = [
+    {
+      title: "Get All Resorts",
+      endpoint: "/resorts",
+      key: "resorts",
+      description: "Returns all ski resorts with their basic information"
+    },
+    {
+      title: "Get Resort by ID",
+      endpoint: "/resorts/kreuzberg",
+      key: "resortById",
+      description: "Returns a specific resort by its ID"
+    },
+    {
+      title: "Get All Slopes",
+      endpoint: "/slopes",
+      key: "slopes",
+      description: "Returns all slopes with their information"
+    },
+    {
+      title: "Get All Lifts",
+      endpoint: "/lifts",
+      key: "lifts",
+      description: "Returns all lifts with their information"
+    },
+    {
+      title: "Get Status",
+      endpoint: "/status",
+      key: "status",
+      description: "Returns the current API status"
     }
-
-    runRequest();
-
-    return () => controller.abort();
-  }, [config.endpoint, trimmedInput]);
+  ];
 
   return (
-    <div className="page-container api-demo-page">
-      <section className="api-demo-hero">
-        <h1>API Demo</h1>
-        <p>
-          Test Resorts, Lifts, and Slopes directly in your browser with live URL preview and
-          formatted JSON responses.
-        </p>
-      </section>
+    <div className="api-demo-page">
+      <h1>API Demo - Test Endpoints</h1>
+      <p className="demo-description">
+        Test the different API endpoints to see what data is available. 
+        This demo shows the raw API responses from the server.
+      </p>
 
-      <section className="api-demo-card">
-        <div className="api-demo-controls">
-          <label htmlFor="api-select">API</label>
-          <select
-            id="api-select"
-            value={selectedApi}
-            onChange={(e) => {
-              setSelectedApi(e.target.value);
-              setInputValue("");
-              setError("");
-            }}
-          >
-            {Object.entries(API_CONFIG).map(([value, item]) => (
-              <option key={value} value={value}>
-                {item.label}
-              </option>
-            ))}
-          </select>
+      <div className="demo-sections">
+        {apiEndpoints.map(section => (
+          <div key={section.key} className="demo-section">
+            <h3>{section.title}</h3>
+            <p className="endpoint-description">{section.description}</p>
+            <p className="endpoint-url"><strong>Endpoint:</strong> {section.endpoint}</p>
+            
+            <div className="demo-actions">
+              <button 
+                onClick={() => fetchData(section.endpoint, section.key)}
+                disabled={loading[section.key]}
+              >
+                {loading[section.key] ? 'Loading...' : 'Test Endpoint'}
+              </button>
+            </div>
 
-          <div className="api-demo-input-block">
-            <label htmlFor="api-id-input">{config.idLabel}</label>
-            <input
-              id="api-id-input"
-              type="text"
-              value={inputValue}
-              placeholder={config.idPlaceholder}
-              onChange={(e) => setInputValue(e.target.value)}
-            />
+            {error[section.key] && (
+              <div className="error-message">
+                Error: {error[section.key]}
+              </div>
+            )}
 
-            {suggestions.length > 0 && (
-              <ul className="api-demo-suggestions">
-                {suggestions.map((suggestion) => (
-                  <li key={suggestion}>
-                    <button type="button" onClick={() => setInputValue(suggestion)}>
-                      {suggestion}
-                    </button>
-                  </li>
-                ))}
-              </ul>
+            {data[section.key] && (
+              <div className="result-preview">
+                <h4>Response:</h4>
+                <pre>{JSON.stringify(
+                  section.key === 'resorts' 
+                    ? Array.isArray(data[section.key]) 
+                      ? data[section.key].slice(0, 3).concat(data[section.key].length > 3 ? ['...'] : [])
+                      : data[section.key]
+                    : data[section.key], 
+                  null, 2
+                )}</pre>
+              </div>
             )}
           </div>
+        ))}
+      </div>
 
-          <div className="api-demo-url-block">
-            <p className="api-demo-url-label">Generated URL</p>
-            <code>{requestUrl}</code>
-          </div>
-        </div>
-      </section>
-
-      <section className="api-demo-response-card">
-        <div className="api-demo-response-head">
-          <h2>Response</h2>
-          {loading && <span>Loading...</span>}
-          {!loading && meta?.isList && (
-            <span>
-              Showing first {Math.min(PREVIEW_LIMIT, meta.totalItems)} of {meta.totalItems} items
-            </span>
-          )}
-        </div>
-
-        {error ? (
-          <p className="api-demo-error">{error}</p>
-        ) : (
-          <pre>{JSON.stringify(responseData, null, 2)}</pre>
-        )}
-      </section>
+      <div className="demo-info">
+        <h3>How to Use:</h3>
+        <ul>
+          <li>Click "Test Endpoint" to make a request to the API</li>
+          <li>View the response data in the preview section</li>
+          <li>Each endpoint shows different types of data from the server</li>
+          <li>Use this to understand what data is available through the API</li>
+        </ul>
+        
+        <h3>Available Endpoints:</h3>
+        <ul>
+          <li><strong>/resorts</strong> - Get all ski resorts</li>
+          <li><strong>/resorts/:id</strong> - Get specific resort by ID</li>
+          <li><strong>/slopes</strong> - Get all slopes</li>
+          <li><strong>/lifts</strong> - Get all lifts</li>
+          <li><strong>/status</strong> - Get API status</li>
+        </ul>
+      </div>
     </div>
   );
 }
