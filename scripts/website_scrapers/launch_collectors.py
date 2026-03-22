@@ -16,13 +16,25 @@ def discover_collectors() -> list[str]:
         if resort_slug.startswith("_"):
             continue
         collectors.append(resort_slug)
+    
+    # Add Alpenplus subdirectory collectors
+    for collector_file in sorted(BASE_DIR.glob("alpenplus/*/collector.py")):
+        resort_slug = f"alpenplus_{collector_file.parent.name}"
+        collectors.append(resort_slug)
+    
     return collectors
 
 
 def build_command(
     resort_slug: str, interval_seconds: int, once: bool, no_sync_api: bool
 ) -> list[str]:
-    module = f"scripts.website_scrapers.{resort_slug}.collector"
+    # Handle Alpenplus subdirectory collectors
+    if resort_slug.startswith("alpenplus_"):
+        resort_name = resort_slug[10:]  # Remove "alpenplus_" prefix
+        module = f"scripts.website_scrapers.alpenplus.{resort_name}.collector"
+    else:
+        module = f"scripts.website_scrapers.{resort_slug}.collector"
+    
     # Do not force --resort-id from folder name.
     # Some collectors use a different canonical resort id than the module slug.
     cmd = [sys.executable, "-m", module]

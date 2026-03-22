@@ -1,0 +1,1 @@
+# Spitzingsee scraper package

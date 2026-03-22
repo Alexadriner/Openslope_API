@@ -1,0 +1,1 @@
+# Wallberg scraper package
