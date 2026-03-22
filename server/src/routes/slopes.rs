@@ -1,3 +1,127 @@
+//! OpenSlope API Slopes Routes
+//!
+//! This module handles all HTTP requests related to ski slope management in the
+//! OpenSlope API. It provides comprehensive CRUD operations for individual slopes
+//! including detailed information about their geometry, specifications, and status.
+//!
+//! # Route Overview
+//!
+//! The slopes module provides the following endpoints:
+//!
+//! - **GET /slopes**: List all slopes with detailed information
+//! - **GET /slopes/{id}**: Get detailed information about a specific slope
+//! - **GET /slopes/by_resort/{resort_id}**: Get all slopes for a specific resort
+//! - **POST /slopes**: Create a new slope
+//! - **PUT /slopes/{id}**: Update an existing slope
+//! - **DELETE /slopes/{id}**: Delete a slope
+//! - **DELETE /slopes/by_resort/{resort_id}**: Delete all slopes for a resort
+//!
+//! # Data Models
+//!
+//! The module defines several data structures for handling slope information:
+//!
+//! - **Slope**: Complete response model with nested data structures
+//! - **SlopeDisplay**: Display-related information (name, difficulty)
+//! - **SlopeGeometry**: Geographical coordinates and path data
+//! - **SlopeSpecs**: Technical specifications (length, gradients, features)
+//! - **SlopeSource**: Source system information and entity references
+//! - **SlopeStatus**: Operational status and grooming information
+//! - **CreateSlope/UpdateSlope**: Input models for creation and updates
+//!
+//! # Key Features
+//!
+//! - **Complex Geometry**: Start/end points plus optional path geometry for detailed mapping
+//! - **Difficulty Classification**: Standard ski slope difficulty levels (Green, Blue, Red, Black)
+//! - **Technical Specifications**: Length, gradients, vertical drop measurements
+//! - **Skiing Features**: Snowmaking, night skiing, family-friendly, race slope indicators
+//! - **Status Management**: Operational status and grooming status tracking
+//! - **Source Integration**: Support for multiple data sources (OSM, official sources)
+//!
+//! # Coordinate System
+//!
+//! - Latitude and longitude use WGS84 coordinate system
+//! - All coordinates are cast to DOUBLE precision for accuracy
+//! - Path geometry supports complex multi-point routes
+//!
+//! # Difficulty Levels
+//!
+//! Standard ski slope difficulty classifications:
+//! - **"Green"**: Beginner slopes, gentle gradients (typically < 25%)
+//! - **"Blue"**: Intermediate slopes, moderate gradients (typically 25-40%)
+//! - **"Red"**: Advanced slopes, steep gradients (typically 40-60%)
+//! - **"Black"**: Expert slopes, very steep and challenging (typically > 60%)
+//!
+//! # Slope Features
+//!
+//! Boolean indicators for slope characteristics:
+//! - **snowmaking**: Whether the slope has artificial snowmaking coverage
+//! - **night_skiing**: Whether the slope is lit for evening skiing
+//! - **family_friendly**: Whether the slope is suitable for families
+//! - **race_slope**: Whether the slope is used for competitive racing
+//!
+//! # Path Geometry
+//!
+//! Slopes can have complex path geometry defined as GeoJSON arrays:
+//! - Each point contains latitude and longitude coordinates
+//! - Supports both "latitude"/"longitude" and "lat"/"lon" field names
+//! - Optional path allows for slopes with non-linear routes
+//! - Direction field provides compass bearing information
+//!
+//! # Status Values
+//!
+//! Operational status values:
+//! - **"Open"**: Slope is currently open for skiing
+//! - **"Closed"**: Slope is closed
+//! - **"Maintenance"**: Slope is under maintenance
+//! - **"Unknown"**: Status is not available
+//!
+//! Grooming status values:
+//! - **"Groomed"**: Slope has been groomed/maintained
+//! - **"Ungroomed"**: Slope has not been groomed
+//! - **"Partially groomed"**: Slope is partially maintained
+//! - **"Unknown"**: Grooming status is not available
+//!
+//! # Performance Considerations
+//!
+//! - **Efficient Geometry Handling**: Optimized path_geojson parsing
+//! - **Error Resilience**: Graceful handling of malformed GeoJSON data
+//! - **Batch Operations**: Support for bulk operations on resort slopes
+//! - **Data Validation**: Comprehensive input validation for all operations
+//!
+//! # Usage Examples
+//!
+//! ```rust
+//! // Get all slopes
+//! GET /api/v1/slopes
+//!
+//! // Get specific slope
+//! GET /api/v1/slopes/123
+//!
+//! // Get slopes for a resort
+//! GET /api/v1/slopes/by_resort/resort_abc
+//!
+//! // Create new slope
+//! POST /api/v1/slopes
+//! {
+//!   "resort_id": "resort_abc",
+//!   "name": "Black Diamond Run",
+//!   "difficulty": "Black",
+//!   "length_m": 2500,
+//!   "average_gradient": 45.5,
+//!   "max_gradient": 65.2,
+//!   "snowmaking": true,
+//!   "lat_start": 47.1234,
+//!   "lon_start": 11.5678,
+//!   "lat_end": 47.1256,
+//!   "lon_end": 11.5690,
+//!   "slope_path_json": "[{\"lat\": 47.1234, \"lon\": 11.5678}, ...]",
+//!   // ... other fields
+//! }
+//! ```
+//!
+//! Author: OpenSlope Team
+//! Version: 1.0.0
+
 use actix_web::{web, HttpResponse, Responder};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

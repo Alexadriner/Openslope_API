@@ -1,3 +1,115 @@
+//! OpenSlope API Status Routes
+//!
+//! This module handles all HTTP requests related to scraping status and operational
+//! data in the OpenSlope API. It provides access to scraping run information and
+//! real-time status snapshots for ski resorts.
+//!
+//! # Route Overview
+//!
+//! The status module provides the following endpoints:
+//!
+//! - **GET /scrape-runs**: List all scraping runs with optional resort filtering
+//! - **GET /scrape-runs/{id}**: Get detailed information about a specific scraping run
+//! - **GET /status-snapshots**: List all status snapshots with optional resort filtering
+//! - **GET /status-snapshots/by_resort/{resort_id}**: Get all status snapshots for a specific resort
+//!
+//! # Data Models
+//!
+//! The module defines several data structures for handling status information:
+//!
+//! - **ScrapeRunResponse**: Information about a scraping operation
+//! - **ResortStatusSnapshotResponse**: Real-time operational status of a resort
+//! - **SnapshotMetric**: Lift and slope count metrics
+//! - **SnowSnapshot**: Snow depth and new snow measurements
+//! - **TemperatureSnapshot**: Temperature readings at valley and mountain levels
+//!
+//! # Key Features
+//!
+//! - **Scraping History**: Complete history of all scraping operations
+//! - **Status Snapshots**: Real-time operational data snapshots
+//! - **Resort Filtering**: All endpoints support optional resort-specific filtering
+//! - **Pagination Control**: Configurable result limits with safety bounds
+//! - **Timestamp Handling**: Proper ISO 8601 timestamp formatting
+//!
+//! # Scraping Run Information
+//!
+//! Each scraping run contains:
+//! - **Run ID**: Unique identifier for the scraping operation
+//! - **Resort ID**: Which resort was scraped
+//! - **Source Name**: Data source being scraped (e.g., "alpenplus", "mtnfeed")
+//! - **Timing**: Start and finish timestamps
+//! - **Success Status**: Whether the scrape completed successfully
+//! - **HTTP Status**: HTTP response code from the source
+//! - **Message**: Any error messages or additional information
+//!
+//! # Status Snapshot Data
+//!
+//! Each status snapshot includes:
+//! - **Snapshot ID**: Unique identifier for the snapshot
+//! - **Run ID**: Which scraping run generated this snapshot
+//! - **Resort ID**: Which resort this snapshot represents
+//! - **Timestamp**: When the snapshot was taken
+//! - **Lift Metrics**: Open/total lift counts
+//! - **Slope Metrics**: Open/total slope counts
+//! - **Snow Data**: Depth measurements and new snow
+//! - **Temperature Data**: Valley and mountain temperature readings
+//!
+//! # Pagination and Limits
+//!
+//! - **Default Limit**: 100 records per request
+//! - **Maximum Limit**: 500 records per request
+//! - **Minimum Limit**: 1 record per request
+//! - **Safety Bounds**: Limits are clamped to prevent excessive data transfer
+//!
+//! # Timestamp Format
+//!
+//! All timestamps are returned in ISO 8601 format:
+//! - Format: `YYYY-MM-DDTHH:MM:SSZ`
+//! - Timezone: UTC (Zulu time)
+//! - Example: `2026-03-22T20:30:45Z`
+//!
+//! # Error Handling
+//!
+//! - **Database Errors**: Return 500 Internal Server Error
+//! - **Missing Resources**: Return 404 Not Found
+//! - **Invalid Parameters**: Return 400 Bad Request
+//! - **Consistent Logging**: All errors are logged with context
+//!
+//! # Performance Considerations
+//!
+//! - **Efficient Queries**: Optimized SQL with proper column selection
+//! - **Index Usage**: Queries designed to use database indexes effectively
+//! - **Result Limiting**: Automatic pagination to prevent large result sets
+//! - **Optional Filtering**: Resort-specific queries for better performance
+//!
+//! # Usage Examples
+//!
+//! ```rust
+//! // Get all scraping runs
+//! GET /api/v1/scrape-runs
+//!
+//! // Get scraping runs for specific resort
+//! GET /api/v1/scrape-runs?resort_id=resort_abc
+//!
+//! // Get scraping runs with custom limit
+//! GET /api/v1/scrape-runs?limit=50
+//!
+//! // Get specific scraping run
+//! GET /api/v1/scrape-runs/123
+//!
+//! // Get all status snapshots
+//! GET /api/v1/status-snapshots
+//!
+//! // Get status snapshots for specific resort
+//! GET /api/v1/status-snapshots/by_resort/resort_abc
+//!
+//! // Get status snapshots with custom limit
+//! GET /api/v1/status-snapshots?limit=25
+//! ```
+//!
+//! Author: OpenSlope Team
+//! Version: 1.0.0
+
 use actix_web::{web, HttpResponse, Responder};
 use serde::{Deserialize, Serialize};
 use sqlx::MySqlPool;

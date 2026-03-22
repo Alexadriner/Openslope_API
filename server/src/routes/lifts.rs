@@ -1,3 +1,100 @@
+//! OpenSlope API Lifts Routes
+//!
+//! This module handles all HTTP requests related to ski lift management in the
+//! OpenSlope API. It provides comprehensive CRUD operations for individual lifts
+//! including detailed information about their specifications, geometry, and status.
+//!
+//! # Route Overview
+//!
+//! The lifts module provides the following endpoints:
+//!
+//! - **GET /lifts**: List all lifts with detailed information
+//! - **GET /lifts/{id}**: Get detailed information about a specific lift
+//! - **GET /lifts/by_resort/{resort_id}**: Get all lifts for a specific resort
+//! - **POST /lifts**: Create a new lift
+//! - **PUT /lifts/{id}**: Update an existing lift
+//! - **DELETE /lifts/{id}**: Delete a lift
+//! - **DELETE /lifts/by_resort/{resort_id}**: Delete all lifts for a resort
+//!
+//! # Data Models
+//!
+//! The module defines several data structures for handling lift information:
+//!
+//! - **Lift**: Complete response model with nested data structures
+//! - **LiftDisplay**: Display-related information (name, type)
+//! - **LiftGeometry**: Geographical coordinates (start/end points)
+//! - **LiftSpecs**: Technical specifications (capacity, seats, year built)
+//! - **LiftSource**: Source system information and entity references
+//! - **LiftStatus**: Operational status and timing information
+//! - **CreateLift/UpdateLift**: Input models for creation and updates
+//!
+//! # Key Features
+//!
+//! - **Geographical Data**: Precise start/end coordinates for lift mapping
+//! - **Technical Specifications**: Capacity, seats, year built, altitude data
+//! - **Status Management**: Operational status, planned times, notes
+//! - **Source Tracking**: Integration with external data sources (OSM, etc.)
+//! - **Resort Association**: All lifts are linked to specific resorts
+//!
+//! # Coordinate System
+//!
+//! - Latitude and longitude use WGS84 coordinate system
+//! - Altitude measurements are in meters above sea level
+//! - Coordinates are cast to DOUBLE precision for accuracy
+//!
+//! # Lift Types
+//!
+//! Common lift types supported:
+//! - **Chairlift**: Detachable or fixed-grip chairlifts
+//! - **Gondola**: Enclosed cabin lifts
+//! - **T-bar**: Surface lift with T-shaped bars
+//! - **Surface lift**: Magic carpet or similar surface lifts
+//! - **Funitel**: Cable transport system with two fixed ropes
+//!
+//! # Status Values
+//!
+//! Operational status values:
+//! - **"Open"**: Lift is currently operating
+//! - **"Closed"**: Lift is not operating
+//! - **"Maintenance"**: Lift is under maintenance
+//! - **"Unknown"**: Status is not available
+//!
+//! # Performance Considerations
+//!
+//! - **Efficient Queries**: Optimized SQL with proper column selection
+//! - **Error Handling**: Comprehensive error logging and user-friendly responses
+//! - **Data Validation**: Input validation for all create/update operations
+//! - **Batch Operations**: Support for bulk operations on resort lifts
+//!
+//! # Usage Examples
+//!
+//! ```rust
+//! // Get all lifts
+//! GET /api/v1/lifts
+//!
+//! // Get specific lift
+//! GET /api/v1/lifts/123
+//!
+//! // Get lifts for a resort
+//! GET /api/v1/lifts/by_resort/resort_abc
+//!
+//! // Create new lift
+//! POST /api/v1/lifts
+//! {
+//!   "resort_id": "resort_abc",
+//!   "name": "Main Chair",
+//!   "lift_type": "Chairlift",
+//!   "capacity_per_hour": 2000,
+//!   "seats": 4,
+//!   "lat_start": 47.1234,
+//!   "lon_start": 11.5678,
+//!   // ... other fields
+//! }
+//! ```
+//!
+//! Author: OpenSlope Team
+//! Version: 1.0.0
+
 use actix_web::{web, HttpResponse, Responder};
 use serde::{Deserialize, Serialize};
 use sqlx::MySqlPool;

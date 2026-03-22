@@ -1,3 +1,75 @@
+//! OpenSlope API Resorts Routes
+//!
+//! This module handles all HTTP requests related to ski resort management in the
+//! OpenSlope API. It provides comprehensive CRUD operations for resorts including
+//! detailed information about lifts, slopes, and operational status.
+//!
+//! # Route Overview
+//!
+//! The resorts module provides the following endpoints:
+//!
+//! - **GET /resorts**: List all resorts with optional summary mode
+//! - **GET /resorts/{id}**: Get detailed information about a specific resort
+//! - **POST /resorts**: Create a new resort
+//! - **PUT /resorts/{id}**: Update an existing resort
+//! - **DELETE /resorts/{id}**: Delete a resort
+//!
+//! # Data Models
+//!
+//! The module defines several data structures for handling resort information:
+//!
+//! - **Resort**: Complete database representation of a resort
+//! - **ResortWithRelations**: Comprehensive response model with nested data
+//! - **CreateResort/UpdateResort**: Input models for creation and updates
+//! - **LiftSummary/SlopeSummary**: Nested models for associated facilities
+//!
+//! # Architecture Patterns
+//!
+//! - **Hierarchical Data**: Resorts contain nested lifts and slopes
+//! - **Optional Fields**: Many fields are optional to handle incomplete data
+//! - **Coordinate Handling**: Latitude/longitude with proper type conversion
+//! - **JSON Path Parsing**: Complex path_geojson parsing for slope routes
+//!
+//! # Performance Optimizations
+//!
+//! - **Batch Loading**: Lifts and slopes are loaded in batches for efficiency
+//! - **HashMap Indexing**: Fast lookup of related data by resort ID
+//! - **Lazy Evaluation**: Only load related data when needed
+//! - **Query Optimization**: Optimized SQL queries with proper column selection
+//!
+//! # Error Handling
+//!
+//! All route handlers implement consistent error handling:
+//! - Database errors return 500 Internal Server Error
+//! - Missing resources return 404 Not Found
+//! - Invalid data returns 400 Bad Request
+//! - Successful operations return appropriate HTTP status codes
+//!
+//! # Usage Examples
+//!
+//! ```rust
+//! // Get all resorts with full details
+//! GET /api/v1/resorts
+//!
+//! // Get resort summary only
+//! GET /api/v1/resorts?summary=1
+//!
+//! // Get specific resort with all related data
+//! GET /api/v1/resorts/resort_123
+//!
+//! // Create new resort
+//! POST /api/v1/resorts
+//! {
+//!   "id": "new_resort",
+//!   "name": "New Ski Resort",
+//!   "country": "Austria",
+//!   // ... other fields
+//! }
+//! ```
+//!
+//! Author: OpenSlope Team
+//! Version: 1.0.0
+
 use actix_web::{web, HttpResponse, Responder};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

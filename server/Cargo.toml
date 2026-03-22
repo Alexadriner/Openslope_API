@@ -1,3 +1,17 @@
+# OpenSlope API Server Dependencies
+# 
+# This Cargo.toml file defines the dependencies and configuration for the
+# OpenSlope API server, a Rust-based web service for managing ski resort data.
+#
+# The server provides RESTful endpoints for:
+# - User authentication and management
+# - Ski resort information
+# - Slope and lift data
+# - Status snapshots and scraping runs
+#
+# Author: OpenSlope Team
+# Version: 1.0.0
+
 cargo-features = ["edition2024"]
 
 [package]
@@ -6,11 +20,20 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+# Web framework for building HTTP servers
 actix-web = "4"
+
+# Serialization and deserialization
 serde = { version = "1.0.197", features = ["derive"] }
 serde_json = "1.0"
+
+# Date and time handling
 chrono = { version = "0.4", features = ["serde"] }
+
+# JSON Web Token authentication
 jsonwebtoken = { version = "10.2.0", features = ["rust_crypto"] }
+
+# Database toolkit with async support
 sqlx = { version = "0.8", features = [
     "mysql",
     "runtime-tokio-native-tls",
@@ -18,17 +41,56 @@ sqlx = { version = "0.8", features = [
     "chrono",
     "time"
 ] }
+
+# Asynchronous runtime
 tokio = { version = "1", features = ["full"] }
+
+# Environment variable loading
 dotenvy = "0.15"
 
+# Additional utilities
 futures-util = "0.3"
 url = "2"
 
+# Cryptography and hashing for passwords
 rand = "0.8"
 base64 = "0.22"
 argon2 = "0.5"
 password-hash = "0.5"
 
+# Alternative time library
 time = "0.3.44"
 
+# Cross-Origin Resource Sharing middleware
 actix-cors = "0.7.1"
+
+[dev-dependencies]
+# Testing utilities
+tokio-test = "0.4"
+testcontainers = "0.5"
+testcontainers-postgres = "0.5"
+
+[profile.dev]
+# Development profile with debug symbols and optimizations disabled
+debug = true
+opt-level = 0
+
+[profile.release]
+# Release profile with optimizations enabled
+debug = false
+opt-level = 3
+lto = true
+codegen-units = 1
+
+[profile.test]
+# Test profile inheriting from dev
+inherits = "dev"
+
+[profile.bench]
+# Benchmark profile inheriting from release
+inherits = "release"
+
+[workspace]
+# Define workspace members if this becomes a multi-crate project
+# members = ["shared", "cli", "web"]
+# resolver = "2"
