@@ -65,6 +65,7 @@ import logging
 import math
 import os
 import requests
+from pathlib import Path
 from typing import Optional
 
 
@@ -88,6 +89,10 @@ LOG_FILE_PATH          = "logs/collect_geojson.log"   # <-- log file path (if LO
 
 # Debug option for unbenannte Pisten
 DEBUG_UNNAMED_SLOPES    = True                         # <-- Set to True to enable debug logging for unnamed slopes
+
+# Storage configuration
+SAVE_SINGLE_RESORT_FILE = True                         # <-- Save each resort to a single file that gets overwritten
+SINGLE_RESORT_FILE      = "current_resort_geojson.json" # <-- File that always contains the most recent resort
 
 # Configuration for nearest neighbor matching
 NEAREST_NEIGHBOR_MAX_DISTANCE_KM = 10.0                 # Maximum distance in km for nearest neighbor matching
@@ -1077,6 +1082,85 @@ def save_worker_progress(worker_id: int, processed_resorts: list) -> None:
         log.error(f"Failed to save progress for worker {worker_id}: {e}")
 
 
+def save_single_resort_file(resort_name: str, resort_id: str, features: list[dict]) -> None:
+    """
+    Save the current resort to a single file that gets overwritten.
+    This file always contains the most recently processed resort.
+    """
+    if not SAVE_SINGLE_RESORT_FILE:
+        return
+    
+    try:
+        resort_data = {
+            "type": "FeatureCollection",
+            "resort_name": resort_name,
+            "resort_id": resort_id,
+            "features": features,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }
+        
+        # Use atomic write to prevent corruption
+        temp_file = Path(SINGLE_RESORT_FILE).with_suffix('.tmp')
+        with open(temp_file, 'w', encoding='utf-8') as f:
+            json.dump(resort_data, f, ensure_ascii=False, indent=2)
+        temp_file.rename(SINGLE_RESORT_FILE)
+        
+        log.info(f"Single resort file saved: {SINGLE_RESORT_FILE} (Resort: {resort_name})")
+        
+    except Exception as e:
+        log.error(f"Failed to save single resort file: {e}")
+
+
+def clear_progress(worker_id: int = None) -> None:
+    """
+    Clear progress files for the specified worker or all workers.
+    If worker_id is None, clears all progress files.
+    """
+    from pathlib import Path
+    import shutil
+    
+    checkpoint_dir = Path("checkpoints") / "collect_geojson"
+    
+    if worker_id is not None:
+        # Clear specific worker progress
+        progress_file = checkpoint_dir / f"worker_{worker_id}_progress.json"
+        if progress_file.exists():
+            progress_file.unlink()
+            log.info(f"Cleared progress for worker {worker_id}")
+        else:
+            log.info(f"No progress file found for worker {worker_id}")
+    else:
+        # Clear all progress files
+        if checkpoint_dir.exists():
+            shutil.rmtree(checkpoint_dir)
+            log.info("Cleared all progress files")
+        else:
+            log.info("No progress directory found")
+    
+    # Also clear the single resort file
+    single_resort_file = Path(SINGLE_RESORT_FILE)
+    if single_resort_file.exists():
+        single_resort_file.unlink()
+        log.info("Cleared single resort file")
+
+
+def skip_resort_after_processing(resort_name: str, resort_id: str, features: list[dict]) -> None:
+    """
+    Debug function: Save the resort data and immediately skip to the next resort.
+    Used in debug mode to test the saving logic without processing all slopes.
+    """
+    if not DEBUG_MODE:
+        return
+    
+    log.info(f"DEBUG MODE: Processing resort '{resort_name}' and then skipping to next...")
+    
+    # Save the current resort data
+    save_single_resort_file(resort_name, resort_id, features)
+    
+    # Immediately skip to next resort
+    log.info(f"DEBUG MODE: Skipping remaining processing for '{resort_name}', moving to next resort")
+
+
 # ---------------------------------------------------------------------------
 # Step 5: Save GeoJSON + direction via PUT /slopes/{id}
 # ---------------------------------------------------------------------------
@@ -1248,6 +1332,17 @@ def collect_geojson(worker_id: int = 0, total_workers: int = 1) -> dict:
         bbox = build_bounding_box(center[0], center[1], BOUNDING_BOX_RADIUS_KM)
         log.debug("Bounding box: %s", bbox)
 
+        # Save debug mode: skip to next resort immediately after finding it, without processing slopes
+        if DEBUG_MODE:
+            log.info(f"SAVE DEBUG MODE: Resort '{name}' found, saving and moving to next resort without processing slopes")
+            # Save empty features for this resort (just the resort info)
+            save_single_resort_file(name, resort_id, [])
+            # Save progress
+            processed_resorts.add(resort_id)
+            save_worker_progress(worker_id, list(processed_resorts))
+            log.info("Moving to next ski area ...")
+            continue
+
         log.info("Fetching OSM slopes ...")
         osm_slopes = fetch_osm_slopes(bbox)
         log.info("  -> %d OSM slopes found.", len(osm_slopes))
@@ -1319,6 +1414,10 @@ def collect_geojson(worker_id: int = 0, total_workers: int = 1) -> dict:
 
         log.info("Moving to next ski area ...")
 
+        # Save the current resort to the single file (overwrites previous)
+        if all_features:
+            save_single_resort_file(name, resort_id, all_features)
+        
         # Save progress after each resort
         processed_resorts.add(resort_id)
         save_worker_progress(worker_id, list(processed_resorts))
@@ -1345,24 +1444,39 @@ def collect_geojson(worker_id: int = 0, total_workers: int = 1) -> dict:
 
 if __name__ == "__main__":
     import sys
+    import argparse
+    from datetime import datetime, timezone
     
     # Parse command line arguments
-    worker_id = 0
-    total_workers = 1
+    parser = argparse.ArgumentParser(description="Collect GeoJSON for ski slopes")
+    parser.add_argument("worker_id", nargs="?", type=int, default=0, help="Worker ID (default: 0)")
+    parser.add_argument("total_workers", nargs="?", type=int, default=1, help="Total number of workers (default: 1)")
+    parser.add_argument("--save_debug", action="store_true", help="Enable save debug mode - find resorts, save locally, then skip to next resort without processing slopes")
+    parser.add_argument("--clear", nargs="*", type=int, help="Clear progress files. If no IDs provided, clears all progress files. If IDs provided, clears only those worker progress files.")
     
-    if len(sys.argv) >= 2:
-        try:
-            worker_id = int(sys.argv[1])
-        except ValueError:
-            log.error("Invalid worker_id argument. Using default (0).")
+    args = parser.parse_args()
     
-    if len(sys.argv) >= 3:
-        try:
-            total_workers = int(sys.argv[2])
-        except ValueError:
-            log.error("Invalid total_workers argument. Using default (1).")
+    # Handle clear command first
+    if args.clear is not None:
+        if len(args.clear) == 0:
+            # Clear all progress files
+            clear_progress()
+            log.info("All progress files cleared. You can now start from scratch.")
+        else:
+            # Clear specific worker progress files
+            for worker_id in args.clear:
+                clear_progress(worker_id)
+            log.info("Progress files cleared for workers: %s", args.clear)
+        sys.exit(0)
     
-    log.info(f"Script started with worker_id={worker_id}, total_workers={total_workers}")
+    # Set debug mode
+    global DEBUG_MODE
+    DEBUG_MODE = args.save_debug
     
-    result = collect_geojson(worker_id, total_workers)
+    if DEBUG_MODE:
+        log.info("SAVE DEBUG MODE ENABLED: Resorts will be processed and saved, then skipped to next resort")
+    
+    log.info(f"Script started with worker_id={args.worker_id}, total_workers={args.total_workers}, debug={DEBUG_MODE}")
+    
+    result = collect_geojson(args.worker_id, args.total_workers)
     log.info("Total result: %d features in FeatureCollection.", len(result["features"]))

@@ -183,6 +183,7 @@ def main():
     parser.add_argument("--workers", type=int, default=10)  # Reduced from 30 to 10
     parser.add_argument("--start-delay", type=float, default=3.0)  # Increased delay
     parser.add_argument("--reset-progress", action="store_true")
+    parser.add_argument("--save-debug", action="store_true", help="Enable save debug mode - start workers but immediately exit to test launcher storage logic without processing")
     args = parser.parse_args()
 
     log_info("=" * 60)
@@ -191,6 +192,55 @@ def main():
     log_info(f"Parameter: workers={args.workers}, start_delay={args.start_delay}s")
     log_info(f"Progress-Verzeichnis: {CHECKPOINT_DIR}")
     log_info("=" * 60)
+
+    # Handle save debug mode
+    if args.save_debug:
+        log_info("SAVE DEBUG MODE ENABLED: Starting workers and then immediately exiting to test launcher storage logic")
+        
+        if args.reset_progress:
+            # Clean up all progress files
+            for f in CHECKPOINT_DIR.glob("*.json"):
+                try:
+                    os.remove(f)
+                    log_info(f"  -> Gelöscht: {f.name}")
+                except OSError as e:
+                    log_warning(f"  -> Konnte {f.name} nicht löschen: {e}")
+            log_info("Fortschritt zurückgesetzt.")
+
+        # Load processed resorts per worker
+        worker_progress = {}
+        for wid in range(args.workers):
+            worker_progress[wid] = set(load_worker_progress(wid))
+
+        # Determine which workers need to run
+        workers_to_run = []
+        for wid in range(args.workers):
+            workers_to_run.append(wid)
+
+        log_info(f"Workers to run: {workers_to_run}")
+
+        # Run workers
+        processes = []
+        for wid in workers_to_run:
+            log_info(f"Starting worker {wid}...")
+            p = subprocess.Popen(
+                [
+                    PYTHON,
+                    str(SCRIPT_PATH),
+                    str(wid),
+                    str(args.workers),
+                    "--save_debug",
+                ],
+                cwd=str(BASE_DIR),
+            )
+            processes.append((wid, p))
+            time.sleep(args.start_delay)
+
+        log_info("\nAlle Worker gestartet.")
+        log_info("SAVE DEBUG MODE: Exiting immediately to test launcher storage logic without processing")
+        
+        # Don't wait for processes to complete - exit immediately
+        return
 
     if args.reset_progress:
         # Clean up all progress files
