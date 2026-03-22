@@ -1,101 +1,101 @@
 #!/usr/bin/env python3
 """
-Launcher for collect_geojson.py with 30 parallel instances.
+GeoJSON Collection Launcher
 
-Usage:
-  python collect_geojson_launcher.py [--workers 30] [--start-delay 1] [--reset-progress]
+This script launches multiple parallel instances of the collect_geojson.py script
+to efficiently process large datasets of ski resort data. It implements sophisticated
+progress tracking and worker management to handle long-running data processing tasks.
 
-Each instance processes a subset of ski areas based on its worker index:
-  - Worker 0:  Ski areas 0, 30, 60, 90, ...
-  - Worker 1:  Ski areas 1, 31, 61, 91, ...
-  - ...
-  - Worker 29: Ski areas 29, 59, 89, 119, ...
+## Features
 
-Progress is tracked per worker in JSON files under checkpoints/collect_geojson/.
-The launcher resumes from the last checkpoint per worker.
-"""
+- **Parallel Processing**: Launches multiple worker instances simultaneously
+- **Progress Tracking**: Per-worker progress persistence with atomic file operations
+- **Resume Support**: Automatically resumes from last checkpoint
+- **Worker Distribution**: Even distribution of work across workers using modulo arithmetic
+- **Debug Support**: Special debug mode for testing launcher logic
+- **Error Handling**: Comprehensive error reporting and graceful shutdown
+- **Logging**: Structured logging with timestamps and rotation
 
-import argparse
-import json
-import logging
-import os
-import subprocess
-import sys
-import time
-from datetime import datetime, timezone
-from pathlib import Path
+## Usage
 
+### Basic Usage
+```bash
+python scripts/data_tools/collect_geojson_launcher.py
+```
 
-# =========================
-# CONFIGURATION
-# =========================
-NUM_WORKERS = 30
-START_DELAY = 1
-SCRIPT_PATH = Path(__file__).resolve().parent / "collect_geojson.py"
-BASE_DIR = Path(__file__).resolve().parents[2]
-CHECKPOINT_DIR = BASE_DIR / "checkpoints" / "collect_geojson"
-LOG_DIR = BASE_DIR / "logs" / "collect_geojson_launcher"
-PROGRESS_FILE = CHECKPOINT_DIR / "launcher_progress.json"
+### Custom Configuration
+```bash
+# Launch with 10 workers and 3-second startup delay
+python scripts/data_tools/collect_geojson_launcher.py --workers 10 --start-delay 3.0
 
-os.makedirs(LOG_DIR, exist_ok=True)
+# Reset progress and start fresh
+python scripts/data_tools/collect_geojson_launcher.py --reset-progress
 
+# Debug mode - start workers and immediately exit
+python scripts/data_tools/collect_geojson_launcher.py --save-debug
+```
 
-# =========================
-# LOGGING SETUP
-# =========================
-def setup_logging():
-    """Configure logging for the launcher."""
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    log_file = LOG_DIR / f"launcher_{timestamp}.log"
-    
-    logger = logging.getLogger("collect_geojson_launcher")
-    logger.setLevel(logging.INFO)
-    
-    file_handler = logging.FileHandler(log_file, encoding="utf-8")
-    file_handler.setLevel(logging.INFO)
-    
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.INFO)
-    
-    formatter = logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
-    file_handler.setFormatter(formatter)
-    console_handler.setFormatter(formatter)
-    
-    logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
-    
-    return logger
+## Worker Distribution
 
+The launcher distributes work by assigning each worker a unique ID and using
+modulo arithmetic to divide the ski areas:
 
-launcher_logger = setup_logging()
+- **Worker 0**: Processes ski areas 0, 30, 60, 90, ...
+- **Worker 1**: Processes ski areas 1, 31, 61, 91, ...
+- **Worker 29**: Processes ski areas 29, 59, 89, 119, ...
 
+This ensures even distribution and prevents overlap between workers.
 
-def log_info(msg):
-    print(msg)
-    launcher_logger.info(msg)
+## Progress Management
 
+### Per-Worker Progress
+Each worker maintains its own progress file:
+- Location: `checkpoints/collect_geojson/worker_{id}_progress.json`
+- Contains: List of processed resort IDs and timestamp
+- Atomic writes: Prevents corruption during crashes
 
-def log_warning(msg):
-    print(f"WARNING: {msg}")
-    launcher_logger.warning(msg)
+### Launcher Progress
+Overall launcher progress is tracked in:
+- Location: `checkpoints/collect_geojson/launcher_progress.json`
+- Contains: Current stage, status, and last processed value
 
+### Progress Recovery
+On startup, the launcher:
+1. Loads progress for each worker
+2. Determines which workers need to run
+3. Resumes processing from the last checkpoint
+4. Skips already processed resorts
 
-def log_error(msg):
-    print(f"ERROR: {msg}")
-    launcher_logger.error(msg)
+## Configuration
 
+### Default Settings
+- `NUM_WORKERS`: 30 (reduced to 10 in current implementation)
+- `START_DELAY`: 1 second between worker startups
+- `SCRIPT_PATH`: Path to collect_geojson.py
+- `BASE_DIR`: Project root directory
 
-# =========================
-# PYTHON EXECUTABLE
-# =========================
-PYTHON = sys.executable
+### Command Line Arguments
+- `--workers`: Number of parallel workers (default: 10)
+- `--start-delay`: Delay between worker startups in seconds (default: 3.0)
+- `--reset-progress`: Clear all progress files and start fresh
+- `--save-debug`: Enable debug mode for testing
 
+## File Structure
 
-# =========================
-# PROGRESS MANAGEMENT
-# =========================
-def write_checkpoint(data, path):
-    """Schreibt Checkpoint atomar, um korrupte Dateien zu vermeiden."""
+```
+project_root/
+├── scripts/data_tools/
+│   ├── collect_geojson_launcher.py    # This launcher script
+│   ├── collect_geojson.py            # Worker script
+│   └── launcher.py                   # Alternative launcher
+├── checkpoints/
+│   └── collect_geojson/
+│       ├── worker_0_progress.json    # Per-worker progress
+│       ├── worker_1_progress.json
+│       ├── ...
+│       └── launcher_progress.json    # Overall progress
+├── logs/
+│   └── collect_geojson_launcher/     # Log files with timestamps
     tmp_path = Path(f"{path}.tmp")
 
     with open(tmp_path, "w", encoding="utf-8") as f:

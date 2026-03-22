@@ -1,63 +1,129 @@
 """
-Step 1: Collect GeoJSON
+GeoJSON Collection Tool
 
-Process:
-  1. Load all ski areas (resorts) from own API
-  2. Load all slopes from own API
-  3. Per ski area: build bounding box (r=10km) and query OSM
-  4. Keep only OSM slopes that also exist in own API (match by name)
-  5. Extract GeoJSON (LineString) + direction
-  6. Save GeoJSON via PUT (direction included in properties)
-  7. Save direction separately via extra PUT (no POST anywhere)
+This script collects and processes ski slope data from OpenStreetMap and matches it with
+existing slope data from the OpenSlope API. It creates detailed GeoJSON representations
+of ski slopes with direction information and saves them back to the API.
 
-Slope data model (own API):
-  - id:          unique ID
-  - name:        slope name or "[color] slope [coordinates]"
-  - difficulty:  difficulty as color ("blue", "red", "black", ...)
-  - coordinates: list of [lon, lat] pairs
+## Process Overview
 
-# ===========================================================================
-# VALUES TO CONFIGURE BEFORE RUNNING
-# ===========================================================================
-#
-#  1. OWN_API_BASE_URL       (line ~35)
-#       Base URL of your own API, e.g. "https://my-api.com/api"
-#       or "http://localhost:8000/api"
-#
-#  2. BOUNDING_BOX_RADIUS_KM (line ~38)
-#       Radius of the bounding box around each resort center in km.
-#       Default is 10. Increase for large ski areas.
-#
-#  3. LOG_LEVEL               (line ~41)
-#       Controls how much output you see. Choose one of:
-#         logging.DEBUG    -> everything (very verbose)
-#         logging.INFO     -> normal operational messages  [default]
-#         logging.WARNING  -> only warnings and errors
-#         logging.ERROR    -> only errors
-#
-#  4. LOG_TO_FILE             (line ~42)
-#       True  -> logs are written to LOG_FILE_PATH as well as the console
-#       False -> console only
-#
-#  5. LOG_FILE_PATH           (line ~43)
-#       Path of the log file, e.g. "logs/collect_geojson.log"
-#       The directory will be created automatically if it does not exist.
-#
-#  6. _parse_resort_center()  (line ~120)
-#       If your /resorts response has a different shape than the four
-#       formats already handled (see docstring), add your own branch here.
-#
-#  7. save_geojson()          (line ~230)
-#       The PUT endpoint for GeoJSON is currently:
-#         PUT {OWN_API_BASE_URL}/slopes/{id}/geojson
-#       Adjust the path if your API uses a different route.
-#
-#  8. save_direction()        (line ~248)
-#       The PUT endpoint for direction is currently:
-#         PUT {OWN_API_BASE_URL}/slopes/{id}
-#       Adjust the path if your API uses a different route.
-#
-# ===========================================================================
+1. **Load Data**: Fetch all ski resorts and slopes from the OpenSlope API
+2. **Query OSM**: For each resort, query OpenStreetMap for downhill slopes within a bounding box
+3. **Match Slopes**: Match OSM slopes with API slopes using name matching and coordinate-based algorithms
+4. **Process Geometry**: Interpolate waypoints for detailed GeoJSON representation
+5. **Calculate Direction**: Extract slope direction (azimuth) from geometry
+6. **Save Data**: Update API slopes with GeoJSON geometry and direction information
+
+## Key Features
+
+- **Parallel Processing**: Supports worker-based parallel execution for large datasets
+- **Smart Matching**: Uses multiple algorithms to match slopes including coordinate tolerance and nearest neighbor
+- **Detailed Geometry**: Interpolates waypoints to create high-resolution GeoJSON with 50m maximum spacing
+- **Robust Error Handling**: Includes retry logic, timeouts, and comprehensive logging
+- **Progress Tracking**: Saves progress to prevent data loss during long-running operations
+- **Debug Support**: Includes debug modes for testing and troubleshooting
+
+## Configuration
+
+The script includes extensive configuration options:
+
+- **API Settings**: Base URL, API key, and endpoint configuration
+- **Bounding Box**: Radius for OSM queries around each resort (default: 10km)
+- **Matching Tolerance**: Distance thresholds for coordinate-based matching
+- **Logging**: Configurable log levels and file output
+- **Debug Options**: Special modes for testing and development
+
+## Usage
+
+### Basic Usage
+```bash
+python scripts/data_tools/collect_geojson.py
+```
+
+### Parallel Processing
+```bash
+# Worker 0 of 4
+python scripts/data_tools/collect_geojson.py 0 4
+
+# Worker 1 of 4
+python scripts/data_tools/collect_geojson.py 1 4
+
+# Worker 2 of 4
+python scripts/data_tools/collect_geojson.py 2 4
+
+# Worker 3 of 4
+python scripts/data_tools/collect_geojson.py 3 4
+```
+
+### Debug Mode
+```bash
+# Enable save debug mode - processes resorts but skips slope processing
+python scripts/data_tools/collect_geojson.py --save_debug
+
+# Clear progress files
+python scripts/data_tools/collect_geojson.py --clear
+
+# Clear specific worker progress
+python scripts/data_tools/collect_geojson.py --clear 0 1
+```
+
+## Command Line Arguments
+
+- `worker_id`: ID of this worker (0-based, default: 0)
+- `total_workers`: Total number of workers for parallel processing (default: 1)
+- `--save_debug`: Enable debug mode that saves resorts but skips slope processing
+- `--clear [worker_ids...]`: Clear progress files (no args = all, specific IDs = those workers)
+
+## Output
+
+- **GeoJSON Files**: `geojson_slopes_worker_{id}.json` - Contains processed slope data
+- **Progress Files**: `checkpoints/collect_geojson/worker_{id}_progress.json` - Tracks processing progress
+- **Single Resort File**: `current_resort_geojson.json` - Always contains the most recently processed resort
+- **Log Files**: Optional logging to file based on configuration
+
+## Matching Algorithms
+
+The script uses multiple sophisticated matching algorithms:
+
+1. **Name-based Matching**: Direct string matching for named slopes
+2. **Coordinate Tolerance**: Matches slopes within a specified distance (default: 0.5km)
+3. **Nearest Neighbor**: Finds closest matching slopes for unnamed slopes (default: 5km max distance)
+4. **Fallback Matching**: Uses larger distance thresholds when other methods fail (default: 20km)
+
+## Coordinate Systems
+
+- **Input**: WGS84 coordinates (latitude/longitude in decimal degrees)
+- **Output**: GeoJSON LineString features with [longitude, latitude] coordinate pairs
+- **Distance Calculations**: Haversine formula for accurate geodesic distances
+
+## Error Handling
+
+The script includes comprehensive error handling:
+
+- **API Timeouts**: Configurable timeouts with retry logic
+- **Overpass API**: Automatic retries for 504 Gateway Timeout errors
+- **Network Issues**: Session-based requests with retry strategies
+- **Data Validation**: Extensive validation of input and output data
+- **Progress Recovery**: Automatic recovery from checkpoints
+
+## Performance Considerations
+
+- **Parallel Processing**: Distribute work across multiple workers
+- **Caching**: Progress tracking prevents reprocessing
+- **Rate Limiting**: Built-in delays to prevent overwhelming APIs
+- **Memory Management**: Efficient data structures and processing
+
+## Dependencies
+
+- `requests`: HTTP client with retry support
+- `urllib3`: HTTP library for retry strategies
+- Standard library modules: `json`, `logging`, `math`, `os`, `pathlib`, `time`, `datetime`
+
+## Author
+OpenSlope Team
+
+## Version
+1.0.0
 """
 
 import json
@@ -67,6 +133,7 @@ import os
 import requests
 from pathlib import Path
 from typing import Optional
+from datetime import datetime, timezone
 
 
 # ---------------------------------------------------------------------------
@@ -1152,7 +1219,7 @@ def skip_resort_after_processing(resort_name: str, resort_id: str, features: lis
     if not DEBUG_MODE:
         return
     
-    log.info(f"DEBUG MODE: Processing resort '{resort_name}' and then skipping to next...")
+    log.info(f"DEBUG MODE: Processing resort '{resort_name}' and then skipping to next resort...")
     
     # Save the current resort data
     save_single_resort_file(resort_name, resort_id, features)

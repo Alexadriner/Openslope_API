@@ -1,3 +1,17 @@
+"""
+Alpenplus Base Scraper
+
+Base class for Alpenplus ski resort scrapers.
+
+All Alpenplus resorts share the same data source:
+https://sdds4.intermaps.com/alpenplus/snowreport_alpenplus.aspx
+
+This base class handles the common logic for extracting data from the shared iframe.
+Individual resort scrapers only need to specify their resort name and ID mapping.
+
+Author: OpenSlope Team
+"""
+
 import logging
 import re
 from datetime import datetime
@@ -18,16 +32,33 @@ class AlpenplusBaseScraper(WebsiteScraperBase):
     Individual resort scrapers only need to specify their resort name and ID mapping.
     """
 
+    # Shared snow report URL for all Alpenplus resorts
     SNOW_REPORT_URL = "https://sdds4.intermaps.com/alpenplus/snowreport_alpenplus.aspx"
 
     def __init__(self, config: ScraperConfig, resort_name: str, resort_id: str):
+        """
+        Initialize the Alpenplus base scraper.
+        
+        Args:
+            config: Scraper configuration object
+            resort_name: Human-readable name of the resort
+            resort_id: Internal ID used in the Alpenplus system
+        """
         super().__init__(config)
         self.resort_name = resort_name
         self.resort_id = resort_id
         self.logger = logging.getLogger(f"website_scraper.alpenplus.{resort_name.lower()}")
 
     def fetch_raw_payload(self, resort_id: str) -> dict[str, Any]:
-        """Fetch raw HTML from the shared Alpenplus snow report page."""
+        """
+        Fetch raw HTML from the shared Alpenplus snow report page.
+        
+        Args:
+            resort_id: The resort ID (not used in this implementation since all resorts share the same URL)
+        
+        Returns:
+            dict: Raw payload containing HTML and metadata
+        """
         html = self.get_html(self.SNOW_REPORT_URL)
         return {
             "report_url": self.SNOW_REPORT_URL,
@@ -37,7 +68,16 @@ class AlpenplusBaseScraper(WebsiteScraperBase):
         }
 
     def normalize_payload(self, resort_id: str, raw_payload: dict[str, Any]) -> dict[str, Any]:
-        """Extract and normalize data for the specific resort from the shared HTML."""
+        """
+        Extract and normalize data for the specific resort from the shared HTML.
+        
+        Args:
+            resort_id: The resort ID (not used in this implementation)
+            raw_payload: Raw payload containing HTML and metadata
+        
+        Returns:
+            dict: Normalized payload with resort, lift, and slope data
+        """
         html = raw_payload.get("html", "")
         
         # Find the resort section in HTML
@@ -78,14 +118,30 @@ class AlpenplusBaseScraper(WebsiteScraperBase):
         }
 
     def _extract_resort_section(self, html: str) -> Optional[str]:
-        """Extract the HTML section for this specific resort."""
+        """
+        Extract the HTML section for this specific resort.
+        
+        Args:
+            html: Full HTML content from the snow report page
+        
+        Returns:
+            Optional[str]: HTML section for the resort, or None if not found
+        """
         # Look for the anchor and extract content until next resort or end
         pattern = rf'<div class="anchor" id="{self.resort_id}"></div>(.*?)(?=<div class="anchor"|$)'
         match = re.search(pattern, html, re.DOTALL | re.IGNORECASE)
         return match.group(1) if match else None
 
     def _extract_resort_data(self, html_section: str) -> Dict[str, Any]:
-        """Extract basic resort data from the HTML section."""
+        """
+        Extract basic resort data from the HTML section.
+        
+        Args:
+            html_section: HTML section containing data for this resort
+        
+        Returns:
+            Dict[str, Any]: Extracted resort data
+        """
         data = {}
         
         # Extract lift counts
@@ -139,7 +195,15 @@ class AlpenplusBaseScraper(WebsiteScraperBase):
         return data
 
     def _extract_lifts(self, html_section: str) -> List[Dict[str, Any]]:
-        """Extract lift information from the HTML section."""
+        """
+        Extract lift information from the HTML section.
+        
+        Args:
+            html_section: HTML section containing data for this resort
+        
+        Returns:
+            List[Dict[str, Any]]: List of lift data dictionaries
+        """
         lifts = []
         
         # This is a simplified extraction - in a real implementation,
@@ -172,7 +236,15 @@ class AlpenplusBaseScraper(WebsiteScraperBase):
         return lifts
 
     def _extract_slopes(self, html_section: str) -> List[Dict[str, Any]]:
-        """Extract slope information from the HTML section."""
+        """
+        Extract slope information from the HTML section.
+        
+        Args:
+            html_section: HTML section containing data for this resort
+        
+        Returns:
+            List[Dict[str, Any]]: List of slope data dictionaries
+        """
         slopes = []
         
         # Similar to lifts, this is simplified
@@ -203,7 +275,12 @@ class AlpenplusBaseScraper(WebsiteScraperBase):
         return slopes
 
     def _empty_payload(self) -> Dict[str, Any]:
-        """Return an empty payload when resort data cannot be found."""
+        """
+        Return an empty payload when resort data cannot be found.
+        
+        Returns:
+            Dict[str, Any]: Empty payload with default values
+        """
         return {
             "resort": {
                 "official_website": self.config.base_url,
