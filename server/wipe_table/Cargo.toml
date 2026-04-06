@@ -1,0 +1,17 @@
+[package]
+name = "wipe_table"
+version = "1.0.0"
+edition = "2021"
+description = "Backup and delete tool for Openslope API tables"
+authors = ["Openslope Team"]
+
+[dependencies]
+reqwest = { version = "0.11", features = ["json", "blocking"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+chrono = "0.4"
+stdext = "0.3"
+
+[profile.release]
+opt-level = 3
+lto = true

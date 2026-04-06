@@ -70,39 +70,100 @@ Openslope_API/
 
 ## ▶️ Usage
 
-### 1. Scrape Resort Data
+### 1. Data Collection from OpenStreetMap
 
-`launcher.py` starts **20 parallel instances** of `ski_scraper.py` to speed up data collection:
+The unified data collection system fetches all ski slopes and lifts worldwide from OpenStreetMap via the Overpass API and syncs them to the Openslope REST API.
 
+#### Running the Parallel Launcher (Recommended)
+
+`parallel_launcher.py` starts multiple parallel worker instances to distribute the workload:
+
+```bash
+# Launch with default number of instances (4)
+python scripts/data_tools/parallel_launcher.py
+
+# Launch with specific number of instances
+python scripts/data_tools/parallel_launcher.py --instances 10
+
+# Dry run to preview worker assignments
+python scripts/data_tools/parallel_launcher.py --dry-run
+
+# Clear all progress files
+python scripts/data_tools/parallel_launcher.py --clear
 ```
+
+Each worker processes a specific longitude range and runs independently. Progress is tracked in `progress_<instance_id>.json` files.
+
+#### Running a Single Worker
+
+```bash
+# Run worker with specific longitude range
+python scripts/data_tools/collect_and_sync.py --instance-id 1 --lng-min -180 --lng-max -144
+
+# Dry run mode (preview without executing)
+python scripts/data_tools/collect_and_sync.py --instance-id 1 --lng-min -180 --lng-max -144 --dry-run
+
+# Clear progress files
+python scripts/data_tools/collect_and_sync.py --clear
+```
+
+#### Configuration
+
+Edit `scripts/data_tools/config.py` to customize:
+- API base URL and authentication key
+- Overpass API endpoint
+- Batch size and retry settings
+- Request delay for rate limiting
+
+### 2. Wipe Table Tool
+
+The `wipe_table` Rust binary creates a JSON backup of all records in a table and then deletes them via the REST API.
+
+```bash
+cd server/wipe_table
+
+# Backup and delete all slopes
+cargo run -- --table slopes
+
+# Backup and delete all lifts with custom backup directory
+cargo run -- --table lifts --backup-dir ./my_backups
+
+# Dry run (create backup only, no deletion)
+cargo run -- --table slopes --dry-run
+```
+
+**Safety features:**
+- All records are backed up to a timestamped JSON file before deletion
+- Backup file is verified to be non-empty before proceeding
+- User confirmation is required before any deletion
+
+### 3. Legacy Scrapers
+
+The original resort scrapers are still available for scraping live status data from resort websites:
+
+```bash
+# Launch 20 parallel instances
 python launcher.py
-```
 
-To run the scraper as a single instance instead:
-
-```
+# Single instance
 python ski_scraper.py
 ```
 
-### 2. Clean the Data
+### 4. Data Cleanup
 
-`cleanup_launcher.py` starts **20 parallel instances** of `cleanup_ski_data.py` to clean and normalize the scraped data:
-
-```
+```bash
+# Launch 20 parallel cleanup instances
 python cleanup_launcher.py
-```
 
-To run the cleanup as a single instance instead:
-
-```
+# Single cleanup instance
 python cleanup_ski_data.py
 ```
 
-### 3. Start the Website
+### 5. Start the Website
 
 Navigate to the `website` folder and start the dev server:
 
-```
+```bash
 cd website
 npm run dev
 ```
