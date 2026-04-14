@@ -10,6 +10,7 @@ reqwest = { version = "0.11", features = ["json", "blocking"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 chrono = "0.4"
+dotenvy = "0.15"
 stdext = "0.3"
 
 [profile.release]

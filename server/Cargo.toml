@@ -68,7 +68,7 @@ actix-cors = "0.7.1"
 # Testing utilities
 tokio-test = "0.4"
 testcontainers = "0.5"
-testcontainers-postgres = "0.5"
+# testcontainers-postgres = "0.5"
 
 [profile.dev]
 # Development profile with debug symbols and optimizations disabled
@@ -91,6 +91,6 @@ inherits = "dev"
 inherits = "release"
 
 [workspace]
-# Define workspace members if this becomes a multi-crate project
-# members = ["shared", "cli", "web"]
+# Define workspace members
+members = ["wipe_table"]
 # resolver = "2"

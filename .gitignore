@@ -95,3 +95,6 @@ database_backups/
 *.tmp
 *.temp
 *.cache
+
+# --- Geojson files ---
+*.geojson

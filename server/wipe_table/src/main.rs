@@ -41,10 +41,12 @@
 //! 1.0.0
 
 use chrono::Local;
+use dotenvy::dotenv;
 use serde_json::Value;
 use std::fs;
 use std::io::{self, Write};
 use std::path::PathBuf;
+use std::env;
 
 // =============================================================================
 // Configuration
@@ -69,7 +71,7 @@ fn create_client() -> reqwest::blocking::Client {
 }
 
 /// Build the API headers with authorization
-fn build_headers() -> reqwest::header::HeaderMap {
+fn build_headers(api_key: &str) -> reqwest::header::HeaderMap {
     let mut headers = reqwest::header::HeaderMap::new();
     headers.insert(
         "Content-Type",
@@ -77,17 +79,17 @@ fn build_headers() -> reqwest::header::HeaderMap {
     );
     headers.insert(
         "Authorization",
-        reqwest::header::HeaderValue::from_str(&format!("Bearer {}", DEFAULT_API_KEY))
-            .unwrap_or_default(),
+        reqwest::header::HeaderValue::from_str(&format!("Bearer {}", api_key))
+            .expect("Invalid API key header value"),
     );
     headers
 }
 
 /// Fetch all records from a table via the API
 /// Uses pagination if needed (API returns all records in one call for simplicity)
-fn fetch_all_records(api_base_url: &str, table: &str) -> Result<Vec<Value>, String> {
+fn fetch_all_records(api_base_url: &str, table: &str, api_key: &str) -> Result<Vec<Value>, String> {
     let client = create_client();
-    let headers = build_headers();
+    let headers = build_headers(api_key);
     let url = format!("{}/{}", api_base_url, table);
 
     println!("Fetching all records from {}...", url);
@@ -113,9 +115,9 @@ fn fetch_all_records(api_base_url: &str, table: &str) -> Result<Vec<Value>, Stri
 }
 
 /// Delete a single record by ID via the API
-fn delete_record(api_base_url: &str, table: &str, id: i64) -> Result<(), String> {
+fn delete_record(api_base_url: &str, table: &str, id: i64, api_key: &str) -> Result<(), String> {
     let client = create_client();
-    let headers = build_headers();
+    let headers = build_headers(api_key);
     let url = format!("{}/{}/{}", api_base_url, table, id);
 
     match client.delete(&url).headers(headers).send() {
@@ -204,15 +206,25 @@ struct CliArgs {
     backup_dir: PathBuf,
     dry_run: bool,
     api_base_url: String,
+    api_key: String,
 }
 
 fn parse_args() -> Result<CliArgs, String> {
     let args: Vec<String> = std::env::args().collect();
 
+    dotenv().ok();
+    if env::var("API_BASE_URL").is_err() || env::var("API_KEY").is_err() {
+        dotenvy::from_filename("../.env").ok();
+    }
+    if env::var("API_BASE_URL").is_err() || env::var("API_KEY").is_err() {
+        dotenvy::from_filename("../../.env").ok();
+    }
+
     let mut table: Option<String> = None;
     let mut backup_dir = PathBuf::from("./backups");
     let mut dry_run = false;
-    let api_base_url = DEFAULT_API_BASE_URL.to_string();
+    let mut api_base_url = env::var("API_BASE_URL").unwrap_or_else(|_| DEFAULT_API_BASE_URL.to_string());
+    let mut api_key = env::var("API_KEY").unwrap_or_else(|_| DEFAULT_API_KEY.to_string());
 
     let mut i = 1;
     while i < args.len() {
@@ -235,6 +247,22 @@ fn parse_args() -> Result<CliArgs, String> {
             }
             "--dry-run" => {
                 dry_run = true;
+            }
+            "--api-base-url" => {
+                i += 1;
+                if i < args.len() {
+                    api_base_url = args[i].clone();
+                } else {
+                    return Err("--api-base-url requires a value".to_string());
+                }
+            }
+            "--api-key" => {
+                i += 1;
+                if i < args.len() {
+                    api_key = args[i].clone();
+                } else {
+                    return Err("--api-key requires a value".to_string());
+                }
             }
             "--help" | "-h" => {
                 print_help();
@@ -263,6 +291,7 @@ fn parse_args() -> Result<CliArgs, String> {
         backup_dir,
         dry_run,
         api_base_url,
+        api_key,
     })
 }
 
@@ -279,6 +308,8 @@ OPTIONS:
                           Valid tables: slopes, lifts, resorts
     --backup-dir <DIR>    Directory for backup files (default: ./backups)
     --dry-run             Preview backup without deleting anything
+    --api-base-url <URL>   API base URL (default from API_BASE_URL env or http://localhost:8080)
+    --api-key <KEY>       API key for authorization (default from API_KEY env)
     --help, -h            Show this help message
 
 EXAMPLES:
@@ -326,7 +357,7 @@ fn main() {
     println!("  API URL:      {}\n", args.api_base_url);
 
     // Step 1: Fetch all records from the table
-    let records = match fetch_all_records(&args.api_base_url, &args.table) {
+    let records = match fetch_all_records(&args.api_base_url, &args.table, &args.api_key) {
         Ok(records) => records,
         Err(e) => {
             eprintln!("Error fetching records: {}", e);
@@ -390,7 +421,7 @@ fn main() {
             .or_else(|| record.get("id").and_then(|v| Value::as_str(v).and_then(|s| s.parse().ok())));
 
         match id {
-            Some(id) => match delete_record(&args.api_base_url, &args.table, id) {
+            Some(id) => match delete_record(&args.api_base_url, &args.table, id, &args.api_key) {
                 Ok(()) => {
                     deleted += 1;
                     if deleted % 100 == 0 || deleted == total_records {
