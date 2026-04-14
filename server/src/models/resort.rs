@@ -97,6 +97,9 @@
 //! Version: 1.0.0
 
 use serde::Serialize;
+use serde_json::Value;
+use super::lift::LiftResponse;
+use super::slope::SlopeResponse;
 
 /// Complete ski resort information for API responses
 ///
@@ -139,12 +142,42 @@ pub struct ResortResponse {
     pub id: String,
     /// Official name of the resort
     pub name: String,
+    /// Resort type or category (e.g. "alpine", "cross-country")
+    pub r#type: Option<String>,
+    /// Current status of the resort
+    pub status: Option<String>,
+    /// Wikidata identifier for the resort
+    pub wikidata_id: Option<String>,
     /// Geographical and administrative location information
     pub location: LocationBlock,
     /// Elevation data for the resort
     pub altitude: AltitudeBlock,
     /// Information about the ski area operations
     pub ski_area: SkiAreaBlock,
+    /// General place-level metadata from the geojson import
+    pub places: Option<Value>,
+    /// Source metadata for the resort record
+    pub sources: Option<Value>,
+    /// Website links associated with the resort
+    pub websites: Option<Value>,
+    /// Activity flags and additional operations metadata
+    pub activities: Option<Value>,
+    /// Statistical information for the resort
+    pub statistics: Option<Value>,
+    /// Viewport hint for map rendering
+    pub viewport_hint: Option<Value>,
+    /// Run convention metadata for the resort
+    pub run_convention: Option<String>,
+    /// Geometry type of the resort location
+    pub geometry_type: Option<String>,
+    /// GeoJSON geometry payload for the resort
+    pub geometry: Option<Value>,
+    /// Additional GeoJSON properties for the resort
+    pub properties: Option<Value>,
+    /// Database creation timestamp
+    pub created_at: Option<String>,
+    /// Database update timestamp
+    pub updated_at: Option<String>,
     /// List of all lifts in the resort
     pub lifts: Vec<LiftResponse>,
     /// List of all slopes in the resort
@@ -173,15 +206,15 @@ pub struct ResortResponse {
 #[derive(Serialize)]
 pub struct LocationBlock {
     /// Country where the resort is located
-    pub country: String,
+    pub country: Option<String>,
     /// Administrative region within the country
-    pub region: String,
+    pub region: Option<String>,
     /// Continent where the resort is located
-    pub continent: String,
+    pub continent: Option<String>,
     /// Geographic latitude coordinate (WGS84)
-    pub latitude: f64,
+    pub latitude: Option<f64>,
     /// Geographic longitude coordinate (WGS84)
-    pub longitude: f64,
+    pub longitude: Option<f64>,
 }
 
 /// Elevation information for a ski resort
@@ -206,11 +239,11 @@ pub struct LocationBlock {
 #[derive(Serialize)]
 pub struct AltitudeBlock {
     /// Altitude of the resort village/base area in meters
-    pub village_altitude_m: i32,
+    pub village_altitude_m: Option<i32>,
     /// Minimum skiable altitude in meters
-    pub min_altitude_m: i32,
+    pub min_altitude_m: Option<i32>,
     /// Maximum skiable altitude in meters
-    pub max_altitude_m: i32,
+    pub max_altitude_m: Option<i32>,
 }
 
 /// Ski area operational information
@@ -239,9 +272,9 @@ pub struct AltitudeBlock {
 #[derive(Serialize)]
 pub struct SkiAreaBlock {
     /// Name of the ski area
-    pub name: String,
+    pub name: Option<String>,
     /// Type of ski area (e.g., "Alpine", "Nordic", "Cross-country")
-    pub area_type: String,
+    pub area_type: Option<String>,
     /// Total length of all slopes in kilometers (optional)
     pub total_slope_km: Option<f64>,
     /// Total number of lifts in the area (optional)
@@ -250,6 +283,30 @@ pub struct SkiAreaBlock {
     pub snowmaking_percent: Option<i32>,
     /// Whether night skiing is available (optional)
     pub night_skiing: Option<bool>,
+    /// Current status of the ski area
+    pub status: Option<String>,
+    /// Wikidata identifier for the ski area
+    pub wikidata_id: Option<String>,
+    /// General place-level metadata
+    pub places: Option<Value>,
+    /// Source metadata for the ski area
+    pub sources: Option<Value>,
+    /// Website metadata for the ski area
+    pub websites: Option<Value>,
+    /// Activity metadata for the ski area
+    pub activities: Option<Value>,
+    /// Statistical metadata for the ski area
+    pub statistics: Option<Value>,
+    /// Viewport hint for the ski area
+    pub viewport_hint: Option<Value>,
+    /// Run convention metadata for the ski area
+    pub run_convention: Option<String>,
+    /// Geometry type for the ski area
+    pub geometry_type: Option<String>,
+    /// GeoJSON geometry payload for the ski area
+    pub geometry: Option<Value>,
+    /// Additional GeoJSON properties for the ski area
+    pub properties: Option<Value>,
 }
 
 /// Individual lift information for API responses
@@ -270,26 +327,6 @@ pub struct SkiAreaBlock {
 /// - "Closed": Lift is not operating
 /// - "Maintenance": Lift is under maintenance
 ///
-/// # Example
-/// ```rust
-/// let lift = LiftResponse {
-///     id: "lift_001".to_string(),
-///     name: "Main Chair".to_string(),
-///     lift_type: "Chairlift".to_string(),
-///     status: "Open".to_string(),
-/// };
-/// ```
-#[derive(Serialize)]
-pub struct LiftResponse {
-    /// Unique identifier for the lift
-    pub id: String,
-    /// Name of the lift
-    pub name: String,
-    /// Type of lift (e.g., "Chairlift", "Gondola", "T-bar")
-    pub lift_type: String,
-    /// Current operational status of the lift
-    pub status: String,
-}
 
 /// Individual slope information for API responses
 ///
@@ -309,23 +346,3 @@ pub struct LiftResponse {
 /// - Represents the total distance from top to bottom of the slope
 /// - May include variations for different route options
 ///
-/// # Example
-/// ```rust
-/// let slope = SlopeResponse {
-///     id: "slope_001".to_string(),
-///     name: "Black Diamond Run".to_string(),
-///     difficulty: "Black".to_string(),
-///     length_km: 2.5,
-/// };
-/// ```
-#[derive(Serialize)]
-pub struct SlopeResponse {
-    /// Unique identifier for the slope
-    pub id: String,
-    /// Name of the slope
-    pub name: String,
-    /// Difficulty level (e.g., "Green", "Blue", "Red", "Black")
-    pub difficulty: String,
-    /// Length of the slope in kilometers
-    pub length_km: f64,
-}

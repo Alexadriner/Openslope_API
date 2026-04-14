@@ -95,35 +95,39 @@
 //! Author: OpenSlope Team
 //! Version: 1.0.0
 
-use actix_web::{web, HttpResponse, Responder};
-use serde::{Deserialize, Serialize};
+use actix_web::{HttpResponse, Responder, web};
+use serde::Serialize;
+use serde_json::Value;
 use sqlx::MySqlPool;
 
 #[derive(Serialize)]
 pub struct Lift {
-    pub id: i64,
-    pub resort_id: String,
+    pub id: String,
+    pub resort_id: Option<String>,
     pub name: Option<String>,
     pub display: LiftDisplay,
     pub geometry: LiftGeometry,
     pub specs: LiftSpecs,
-    pub source: LiftSource,
+    pub source: Option<LiftSource>,
+    pub description: Option<String>,
     pub status: LiftStatus,
 }
 
 #[derive(Serialize)]
 pub struct LiftDisplay {
     pub normalized_name: Option<String>,
-    pub lift_type: String,
+    pub lift_type: Option<String>,
 }
 
 #[derive(Serialize)]
 pub struct LiftGeometry {
+    pub geometry_type: Option<String>,
     pub start: CoordinatePoint,
     pub end: CoordinatePoint,
+    pub path: Option<Vec<CoordinatePoint>>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 pub struct CoordinatePoint {
     pub latitude: Option<f64>,
     pub longitude: Option<f64>,
@@ -131,98 +135,149 @@ pub struct CoordinatePoint {
 
 #[derive(Serialize)]
 pub struct LiftSpecs {
-    pub capacity_per_hour: Option<i32>,
-    pub seats: Option<i8>,
+    pub capacity: Option<i32>,
+    pub duration_minutes: Option<f64>,
+    pub detachable: bool,
+    pub heating: bool,
     pub bubble: bool,
-    pub heated_seats: bool,
-    pub year_built: Option<i16>,
-    pub altitude_start_m: Option<i32>,
-    pub altitude_end_m: Option<i32>,
 }
 
 #[derive(Serialize)]
 pub struct LiftSource {
-    pub system: String,
+    pub system: Option<String>,
     pub entity_id: Option<String>,
-    pub source_url: Option<String>,
 }
 
 #[derive(Serialize)]
 pub struct LiftStatus {
-    pub operational_status: String,
+    pub status: Option<String>,
     pub note: Option<String>,
-    pub planned_open_time: Option<String>,
-    pub planned_close_time: Option<String>,
     pub updated_at: Option<String>,
 }
 
-#[derive(Deserialize)]
-pub struct CreateLift {
-    pub resort_id: String,
-    pub name: Option<String>,
-    pub lift_type: String,
-    pub capacity_per_hour: Option<i32>,
-    pub seats: Option<i8>,
-    pub bubble: Option<bool>,
-    pub heated_seats: Option<bool>,
-    pub year_built: Option<i16>,
-    pub altitude_start_m: Option<i32>,
-    pub altitude_end_m: Option<i32>,
-    pub lat_start: Option<f64>,
-    pub lon_start: Option<f64>,
-    pub lat_end: Option<f64>,
-    pub lon_end: Option<f64>,
-    pub source_system: Option<String>,
-    pub source_entity_id: Option<String>,
-    pub name_normalized: Option<String>,
-    pub operational_status: Option<String>,
-    pub operational_note: Option<String>,
-    pub planned_open_time: Option<String>,
-    pub planned_close_time: Option<String>,
-    pub status_updated_at: Option<String>,
-    pub status_source_url: Option<String>,
+fn parse_geojson_geometry(raw: Option<String>) -> (Option<String>, Option<Vec<CoordinatePoint>>) {
+    match raw.and_then(|value| serde_json::from_str::<Value>(&value).ok()) {
+        Some(parsed) => {
+            let geometry_type = parsed
+                .get("type")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let path = parsed.get("coordinates").and_then(flatten_coordinates);
+            (geometry_type, path)
+        }
+        None => (None, None),
+    }
 }
 
-#[derive(Deserialize)]
-pub struct UpdateLift {
-    pub resort_id: String,
-    pub name: Option<String>,
-    pub lift_type: String,
-    pub capacity_per_hour: Option<i32>,
-    pub seats: Option<i8>,
-    pub bubble: Option<bool>,
-    pub heated_seats: Option<bool>,
-    pub year_built: Option<i16>,
-    pub altitude_start_m: Option<i32>,
-    pub altitude_end_m: Option<i32>,
-    pub lat_start: Option<f64>,
-    pub lon_start: Option<f64>,
-    pub lat_end: Option<f64>,
-    pub lon_end: Option<f64>,
-    pub source_system: Option<String>,
-    pub source_entity_id: Option<String>,
-    pub name_normalized: Option<String>,
-    pub operational_status: Option<String>,
-    pub operational_note: Option<String>,
-    pub planned_open_time: Option<String>,
-    pub planned_close_time: Option<String>,
-    pub status_updated_at: Option<String>,
-    pub status_source_url: Option<String>,
+fn flatten_coordinates(value: &Value) -> Option<Vec<CoordinatePoint>> {
+    if let Value::Array(arr) = value {
+        if arr.is_empty() {
+            return None;
+        }
+
+        if arr.iter().all(|item| item.is_number()) {
+            return coordinate_point_from_array(arr);
+        }
+
+        let mut points = Vec::new();
+        for item in arr {
+            if let Some(mut nested) = flatten_coordinates(item) {
+                points.append(&mut nested);
+            }
+        }
+
+        if points.is_empty() {
+            None
+        } else {
+            Some(points)
+        }
+    } else {
+        None
+    }
+}
+
+fn coordinate_point_from_array(arr: &[Value]) -> Option<Vec<CoordinatePoint>> {
+    if arr.len() >= 2 {
+        let lon = arr[0].as_f64();
+        let lat = arr[1].as_f64();
+        if latitude_and_longitude_valid(lat, lon) {
+            return Some(vec![CoordinatePoint {
+                latitude: lat,
+                longitude: lon,
+            }]);
+        }
+    }
+    None
+}
+
+fn latitude_and_longitude_valid(lat: Option<f64>, lon: Option<f64>) -> bool {
+    lat.is_some() && lon.is_some()
+}
+
+fn parse_first_ski_area(raw: Option<String>) -> Option<String> {
+    let raw = raw?;
+    let parsed: Value = serde_json::from_str(&raw).ok()?;
+
+    if let Some(array) = parsed.as_array() {
+        for item in array {
+            if let Some(value) = item.as_str() {
+                return Some(value.to_string());
+            }
+            if let Some(id) = item.get("id").and_then(|v| v.as_str()) {
+                return Some(id.to_string());
+            }
+        }
+    }
+
+    parsed.as_str().map(|s| s.to_string())
+}
+
+fn parse_source_info(raw: Option<String>) -> Option<LiftSource> {
+    let raw = raw?;
+    let parsed: Value = serde_json::from_str(&raw).ok()?;
+    let source = if parsed.is_array() {
+        parsed.get(0)?
+    } else {
+        &parsed
+    };
+
+    if !source.is_object() {
+        return None;
+    }
+
+    let system = source
+        .get("system")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let entity_id = source
+        .get("entity_id")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    if system.is_none() && entity_id.is_none() {
+        return None;
+    }
+
+    Some(LiftSource { system, entity_id })
+}
+
+fn parse_heating(value: Option<String>) -> bool {
+    value
+        .map(|s| matches!(s.to_ascii_lowercase().as_str(), "heated" | "true" | "yes"))
+        .unwrap_or(false)
 }
 
 pub async fn get_lifts(db: web::Data<MySqlPool>) -> impl Responder {
     let result = sqlx::query!(
         r#"
-        SELECT id, resort_id, name, lift_type, name_normalized,
-               capacity_per_hour, seats, bubble, heated_seats, year_built, altitude_start_m, altitude_end_m,
-               CAST(lat_start AS DOUBLE) AS lat_start, CAST(lon_start AS DOUBLE) AS lon_start,
-               CAST(lat_end AS DOUBLE) AS lat_end, CAST(lon_end AS DOUBLE) AS lon_end,
-               source_system, source_entity_id, operational_status, operational_note, status_source_url,
-               DATE_FORMAT(planned_open_time, '%H:%i:%s') AS planned_open_time,
-               DATE_FORMAT(planned_close_time, '%H:%i:%s') AS planned_close_time,
-               DATE_FORMAT(status_updated_at, '%Y-%m-%dT%H:%i:%sZ') AS status_updated_at
-        FROM lifts
-        ORDER BY resort_id, name
+        SELECT id, name, lift_type, `type` AS feature_type,
+               capacity, duration, detachable, heating, bubble,
+               description, status,
+               CAST(geometry AS CHAR) AS geometry_json,
+               CAST(sources AS CHAR) AS sources_json,
+               CAST(ski_areas AS CHAR) AS ski_areas_json
+        FROM geojson_lifts
+        ORDER BY name
         "#
     )
     .fetch_all(db.get_ref())
@@ -231,45 +286,52 @@ pub async fn get_lifts(db: web::Data<MySqlPool>) -> impl Responder {
     match result {
         Ok(rows) => HttpResponse::Ok().json(
             rows.into_iter()
-                .map(|row| Lift {
-                    id: row.id,
-                    resort_id: row.resort_id,
-                    name: row.name,
-                    display: LiftDisplay {
-                        normalized_name: row.name_normalized,
-                        lift_type: row.lift_type,
-                    },
-                    geometry: LiftGeometry {
-                        start: CoordinatePoint {
-                            latitude: row.lat_start,
-                            longitude: row.lon_start,
+                .map(|row| {
+                    let (geometry_type, path) = parse_geojson_geometry(row.geometry_json);
+                    let start = path
+                        .as_ref()
+                        .and_then(|points| points.first().cloned())
+                        .unwrap_or(CoordinatePoint {
+                            latitude: None,
+                            longitude: None,
+                        });
+                    let end = path
+                        .as_ref()
+                        .and_then(|points| points.last().cloned())
+                        .unwrap_or(CoordinatePoint {
+                            latitude: None,
+                            longitude: None,
+                        });
+
+                    Lift {
+                        id: row.id,
+                        resort_id: parse_first_ski_area(row.ski_areas_json),
+                        name: row.name,
+                        display: LiftDisplay {
+                            normalized_name: None,
+                            lift_type: row.lift_type.or(row.feature_type),
                         },
-                        end: CoordinatePoint {
-                            latitude: row.lat_end,
-                            longitude: row.lon_end,
+                        geometry: LiftGeometry {
+                            geometry_type,
+                            start,
+                            end,
+                            path,
                         },
-                    },
-                    specs: LiftSpecs {
-                        capacity_per_hour: row.capacity_per_hour,
-                        seats: row.seats,
-                        bubble: row.bubble.unwrap_or(0) != 0,
-                        heated_seats: row.heated_seats.unwrap_or(0) != 0,
-                        year_built: row.year_built,
-                        altitude_start_m: row.altitude_start_m,
-                        altitude_end_m: row.altitude_end_m,
-                    },
-                    source: LiftSource {
-                        system: row.source_system,
-                        entity_id: row.source_entity_id,
-                        source_url: row.status_source_url,
-                    },
-                    status: LiftStatus {
-                        operational_status: row.operational_status,
-                        note: row.operational_note,
-                        planned_open_time: row.planned_open_time,
-                        planned_close_time: row.planned_close_time,
-                        updated_at: row.status_updated_at,
-                    },
+                        specs: LiftSpecs {
+                            capacity: row.capacity,
+                            duration_minutes: row.duration,
+                            detachable: row.detachable.unwrap_or(false),
+                            heating: parse_heating(row.heating),
+                            bubble: row.bubble.unwrap_or(false),
+                        },
+                        source: parse_source_info(row.sources_json),
+                        description: row.description,
+                        status: LiftStatus {
+                            status: row.status,
+                            note: None,
+                            updated_at: None,
+                        },
+                    }
                 })
                 .collect::<Vec<Lift>>(),
         ),
@@ -280,66 +342,71 @@ pub async fn get_lifts(db: web::Data<MySqlPool>) -> impl Responder {
     }
 }
 
-pub async fn get_lift(db: web::Data<MySqlPool>, id: web::Path<i64>) -> impl Responder {
+pub async fn get_lift(db: web::Data<MySqlPool>, id: web::Path<String>) -> impl Responder {
     let result = sqlx::query!(
         r#"
-        SELECT id, resort_id, name, lift_type, name_normalized,
-               capacity_per_hour, seats, bubble, heated_seats, year_built, altitude_start_m, altitude_end_m,
-               CAST(lat_start AS DOUBLE) AS lat_start, CAST(lon_start AS DOUBLE) AS lon_start,
-               CAST(lat_end AS DOUBLE) AS lat_end, CAST(lon_end AS DOUBLE) AS lon_end,
-               source_system, source_entity_id, operational_status, operational_note, status_source_url,
-               DATE_FORMAT(planned_open_time, '%H:%i:%s') AS planned_open_time,
-               DATE_FORMAT(planned_close_time, '%H:%i:%s') AS planned_close_time,
-               DATE_FORMAT(status_updated_at, '%Y-%m-%dT%H:%i:%sZ') AS status_updated_at
-        FROM lifts
+        SELECT id, name, lift_type, `type` AS feature_type,
+               capacity, duration, detachable, heating, bubble,
+               description, status,
+               CAST(geometry AS CHAR) AS geometry_json,
+               CAST(sources AS CHAR) AS sources_json,
+               CAST(ski_areas AS CHAR) AS ski_areas_json
+        FROM geojson_lifts
         WHERE id = ?
         "#,
-        *id
+        id.into_inner()
     )
     .fetch_optional(db.get_ref())
     .await;
 
     match result {
-        Ok(Some(row)) => HttpResponse::Ok().json(Lift {
-            id: row.id,
-            resort_id: row.resort_id,
-            name: row.name,
-            display: LiftDisplay {
-                normalized_name: row.name_normalized,
-                lift_type: row.lift_type,
-            },
-            geometry: LiftGeometry {
-                start: CoordinatePoint {
-                    latitude: row.lat_start,
-                    longitude: row.lon_start,
+        Ok(Some(row)) => {
+            let (geometry_type, path) = parse_geojson_geometry(row.geometry_json);
+            let start = path
+                .as_ref()
+                .and_then(|points| points.first().cloned())
+                .unwrap_or(CoordinatePoint {
+                    latitude: None,
+                    longitude: None,
+                });
+            let end = path
+                .as_ref()
+                .and_then(|points| points.last().cloned())
+                .unwrap_or(CoordinatePoint {
+                    latitude: None,
+                    longitude: None,
+                });
+
+            HttpResponse::Ok().json(Lift {
+                id: row.id,
+                resort_id: parse_first_ski_area(row.ski_areas_json),
+                name: row.name,
+                display: LiftDisplay {
+                    normalized_name: None,
+                    lift_type: row.lift_type.or(row.feature_type),
                 },
-                end: CoordinatePoint {
-                    latitude: row.lat_end,
-                    longitude: row.lon_end,
+                geometry: LiftGeometry {
+                    geometry_type,
+                    start,
+                    end,
+                    path,
                 },
-            },
-            specs: LiftSpecs {
-                capacity_per_hour: row.capacity_per_hour,
-                seats: row.seats,
-                bubble: row.bubble.unwrap_or(0) != 0,
-                heated_seats: row.heated_seats.unwrap_or(0) != 0,
-                year_built: row.year_built,
-                altitude_start_m: row.altitude_start_m,
-                altitude_end_m: row.altitude_end_m,
-            },
-            source: LiftSource {
-                system: row.source_system,
-                entity_id: row.source_entity_id,
-                source_url: row.status_source_url,
-            },
-            status: LiftStatus {
-                operational_status: row.operational_status,
-                note: row.operational_note,
-                planned_open_time: row.planned_open_time,
-                planned_close_time: row.planned_close_time,
-                updated_at: row.status_updated_at,
-            },
-        }),
+                specs: LiftSpecs {
+                    capacity: row.capacity,
+                    duration_minutes: row.duration,
+                    detachable: row.detachable.unwrap_or(false),
+                    heating: parse_heating(row.heating),
+                    bubble: row.bubble.unwrap_or(false),
+                },
+                source: parse_source_info(row.sources_json),
+                description: row.description,
+                status: LiftStatus {
+                    status: row.status,
+                    note: None,
+                    updated_at: None,
+                },
+            })
+        }
         Ok(None) => HttpResponse::NotFound().finish(),
         Err(err) => {
             eprintln!("GET /lifts/{{id}} error: {:?}", err);
@@ -354,16 +421,14 @@ pub async fn get_lifts_by_resort(
 ) -> impl Responder {
     let result = sqlx::query!(
         r#"
-        SELECT id, resort_id, name, lift_type, name_normalized,
-               capacity_per_hour, seats, bubble, heated_seats, year_built, altitude_start_m, altitude_end_m,
-               CAST(lat_start AS DOUBLE) AS lat_start, CAST(lon_start AS DOUBLE) AS lon_start,
-               CAST(lat_end AS DOUBLE) AS lat_end, CAST(lon_end AS DOUBLE) AS lon_end,
-               source_system, source_entity_id, operational_status, operational_note, status_source_url,
-               DATE_FORMAT(planned_open_time, '%H:%i:%s') AS planned_open_time,
-               DATE_FORMAT(planned_close_time, '%H:%i:%s') AS planned_close_time,
-               DATE_FORMAT(status_updated_at, '%Y-%m-%dT%H:%i:%sZ') AS status_updated_at
-        FROM lifts
-        WHERE resort_id = ?
+        SELECT id, name, lift_type, `type` AS feature_type,
+               capacity, duration, detachable, heating, bubble,
+               description, status,
+               CAST(geometry AS CHAR) AS geometry_json,
+               CAST(sources AS CHAR) AS sources_json,
+               CAST(ski_areas AS CHAR) AS ski_areas_json
+        FROM geojson_lifts
+        WHERE JSON_CONTAINS(ski_areas, JSON_QUOTE(?))
         ORDER BY name
         "#,
         resort_id.into_inner()
@@ -374,45 +439,52 @@ pub async fn get_lifts_by_resort(
     match result {
         Ok(rows) => HttpResponse::Ok().json(
             rows.into_iter()
-                .map(|row| Lift {
-                    id: row.id,
-                    resort_id: row.resort_id,
-                    name: row.name,
-                    display: LiftDisplay {
-                        normalized_name: row.name_normalized,
-                        lift_type: row.lift_type,
-                    },
-                    geometry: LiftGeometry {
-                        start: CoordinatePoint {
-                            latitude: row.lat_start,
-                            longitude: row.lon_start,
+                .map(|row| {
+                    let (geometry_type, path) = parse_geojson_geometry(row.geometry_json);
+                    let start = path
+                        .as_ref()
+                        .and_then(|points| points.first().cloned())
+                        .unwrap_or(CoordinatePoint {
+                            latitude: None,
+                            longitude: None,
+                        });
+                    let end = path
+                        .as_ref()
+                        .and_then(|points| points.last().cloned())
+                        .unwrap_or(CoordinatePoint {
+                            latitude: None,
+                            longitude: None,
+                        });
+
+                    Lift {
+                        id: row.id,
+                        resort_id: parse_first_ski_area(row.ski_areas_json),
+                        name: row.name,
+                        display: LiftDisplay {
+                            normalized_name: None,
+                            lift_type: row.lift_type.or(row.feature_type),
                         },
-                        end: CoordinatePoint {
-                            latitude: row.lat_end,
-                            longitude: row.lon_end,
+                        geometry: LiftGeometry {
+                            geometry_type,
+                            start,
+                            end,
+                            path,
                         },
-                    },
-                    specs: LiftSpecs {
-                        capacity_per_hour: row.capacity_per_hour,
-                        seats: row.seats,
-                        bubble: row.bubble.unwrap_or(0) != 0,
-                        heated_seats: row.heated_seats.unwrap_or(0) != 0,
-                        year_built: row.year_built,
-                        altitude_start_m: row.altitude_start_m,
-                        altitude_end_m: row.altitude_end_m,
-                    },
-                    source: LiftSource {
-                        system: row.source_system,
-                        entity_id: row.source_entity_id,
-                        source_url: row.status_source_url,
-                    },
-                    status: LiftStatus {
-                        operational_status: row.operational_status,
-                        note: row.operational_note,
-                        planned_open_time: row.planned_open_time,
-                        planned_close_time: row.planned_close_time,
-                        updated_at: row.status_updated_at,
-                    },
+                        specs: LiftSpecs {
+                            capacity: row.capacity,
+                            duration_minutes: row.duration,
+                            detachable: row.detachable.unwrap_or(false),
+                            heating: parse_heating(row.heating),
+                            bubble: row.bubble.unwrap_or(false),
+                        },
+                        source: parse_source_info(row.sources_json),
+                        description: row.description,
+                        status: LiftStatus {
+                            status: row.status,
+                            note: None,
+                            updated_at: None,
+                        },
+                    }
                 })
                 .collect::<Vec<Lift>>(),
         ),
@@ -423,144 +495,25 @@ pub async fn get_lifts_by_resort(
     }
 }
 
-pub async fn create_lift(
-    db: web::Data<MySqlPool>,
-    lift: web::Json<CreateLift>,
-) -> impl Responder {
-    let result = sqlx::query!(
-        r#"
-        INSERT INTO lifts
-        (resort_id, name, lift_type,
-         capacity_per_hour, seats, bubble, heated_seats, year_built, altitude_start_m, altitude_end_m,
-         lat_start, lon_start, lat_end, lon_end,
-         source_system, source_entity_id, name_normalized,
-         operational_status, operational_note, planned_open_time, planned_close_time, status_updated_at, status_source_url)
-        VALUES (?, ?, ?,
-                ?, ?, ?, ?, ?, ?, ?,
-                ?, ?, ?, ?,
-                ?, ?, ?,
-                ?, ?, ?, ?, ?, ?)
-        "#,
-        lift.resort_id,
-        lift.name,
-        lift.lift_type,
-        lift.capacity_per_hour,
-        lift.seats,
-        lift.bubble.unwrap_or(false),
-        lift.heated_seats.unwrap_or(false),
-        lift.year_built,
-        lift.altitude_start_m,
-        lift.altitude_end_m,
-        lift.lat_start,
-        lift.lon_start,
-        lift.lat_end,
-        lift.lon_end,
-        lift.source_system.as_deref().unwrap_or("osm"),
-        lift.source_entity_id,
-        lift.name_normalized,
-        lift.operational_status.as_deref().unwrap_or("unknown"),
-        lift.operational_note,
-        lift.planned_open_time,
-        lift.planned_close_time,
-        lift.status_updated_at,
-        lift.status_source_url
-    )
-    .execute(db.get_ref())
-    .await;
-
-    match result {
-        Ok(res) => HttpResponse::Created().json(res.last_insert_id()),
-        Err(err) => {
-            eprintln!("POST /lifts error: {:?}", err);
-            HttpResponse::BadRequest().finish()
-        }
-    }
+pub async fn create_lift(_db: web::Data<MySqlPool>) -> impl Responder {
+    HttpResponse::MethodNotAllowed()
+        .body("Create operations are not supported for geojson import lift data")
 }
 
-pub async fn update_lift(
-    db: web::Data<MySqlPool>,
-    id: web::Path<i64>,
-    lift: web::Json<UpdateLift>,
-) -> impl Responder {
-    let result = sqlx::query!(
-        r#"
-        UPDATE lifts
-        SET resort_id = ?, name = ?, lift_type = ?,
-            capacity_per_hour = ?, seats = ?, bubble = ?, heated_seats = ?, year_built = ?, altitude_start_m = ?, altitude_end_m = ?,
-            lat_start = ?, lon_start = ?, lat_end = ?, lon_end = ?,
-            source_system = ?, source_entity_id = ?, name_normalized = ?,
-            operational_status = ?, operational_note = ?, planned_open_time = ?, planned_close_time = ?, status_updated_at = ?, status_source_url = ?
-        WHERE id = ?
-        "#,
-        lift.resort_id,
-        lift.name,
-        lift.lift_type,
-        lift.capacity_per_hour,
-        lift.seats,
-        lift.bubble.unwrap_or(false),
-        lift.heated_seats.unwrap_or(false),
-        lift.year_built,
-        lift.altitude_start_m,
-        lift.altitude_end_m,
-        lift.lat_start,
-        lift.lon_start,
-        lift.lat_end,
-        lift.lon_end,
-        lift.source_system.as_deref().unwrap_or("osm"),
-        lift.source_entity_id,
-        lift.name_normalized,
-        lift.operational_status.as_deref().unwrap_or("unknown"),
-        lift.operational_note,
-        lift.planned_open_time,
-        lift.planned_close_time,
-        lift.status_updated_at,
-        lift.status_source_url,
-        *id
-    )
-    .execute(db.get_ref())
-    .await;
-
-    match result {
-        Ok(res) if res.rows_affected() == 0 => HttpResponse::NotFound().finish(),
-        Ok(_) => HttpResponse::Ok().finish(),
-        Err(err) => {
-            eprintln!("PUT /lifts/{{id}} error: {:?}", err);
-            HttpResponse::BadRequest().finish()
-        }
-    }
+pub async fn update_lift(_db: web::Data<MySqlPool>, _id: web::Path<String>) -> impl Responder {
+    HttpResponse::MethodNotAllowed()
+        .body("Update operations are not supported for geojson import lift data")
 }
 
-pub async fn delete_lift(
-    db: web::Data<MySqlPool>,
-    id: web::Path<i64>,
-) -> impl Responder {
-    let result = sqlx::query!("DELETE FROM lifts WHERE id = ?", *id)
-        .execute(db.get_ref())
-        .await;
-
-    match result {
-        Ok(res) if res.rows_affected() == 0 => HttpResponse::NotFound().finish(),
-        Ok(_) => HttpResponse::NoContent().finish(),
-        Err(err) => {
-            eprintln!("DELETE /lifts/{{id}} error: {:?}", err);
-            HttpResponse::BadRequest().finish()
-        }
-    }
+pub async fn delete_lift(_db: web::Data<MySqlPool>, _id: web::Path<String>) -> impl Responder {
+    HttpResponse::MethodNotAllowed()
+        .body("Delete operations are not supported for geojson import lift data")
 }
 
 pub async fn delete_lifts_by_resort(
-    db: web::Data<MySqlPool>,
-    resort_id: web::Path<String>,
+    _db: web::Data<MySqlPool>,
+    _resort_id: web::Path<String>,
 ) -> impl Responder {
-    let result = sqlx::query!("DELETE FROM lifts WHERE resort_id = ?", resort_id.into_inner())
-        .execute(db.get_ref())
-        .await;
-
-    match result {
-        Ok(res) => HttpResponse::Ok().json(res.rows_affected()),
-        Err(err) => {
-            eprintln!("DELETE /lifts/by_resort error: {:?}", err);
-            HttpResponse::InternalServerError().finish()
-        }
-    }
+    HttpResponse::MethodNotAllowed()
+        .body("Delete operations are not supported for geojson import lift data")
 }

@@ -70,7 +70,7 @@
 //! Author: OpenSlope Team
 //! Version: 1.0.0
 
-use actix_web::{web, HttpResponse, Responder};
+use actix_web::{HttpResponse, Responder, web};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::{Error, MySqlPool};
@@ -80,7 +80,7 @@ use std::collections::HashMap;
 pub struct Resort {
     pub id: String,
     pub name: String,
-    pub country: String,
+    pub country: Option<String>,
     pub region: Option<String>,
     pub continent: Option<String>,
     pub latitude: Option<f64>,
@@ -222,7 +222,7 @@ pub struct Coordinates {
 #[derive(Serialize)]
 pub struct Geography {
     pub continent: Option<String>,
-    pub country: String,
+    pub country: Option<String>,
     pub region: Option<String>,
     pub coordinates: Coordinates,
 }
@@ -334,7 +334,26 @@ pub struct ResortSummary {
 }
 
 fn is_truthy_flag(value: &str) -> bool {
-    matches!(value.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on")
+    matches!(
+        value.to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "on"
+    )
+}
+
+fn parse_geojson_geometry(raw: Option<String>) -> (Option<String>, Option<Vec<CoordinatePoint>>) {
+    match raw.and_then(|value| serde_json::from_str::<Value>(&value).ok()) {
+        Some(parsed) => {
+            let geometry_type = parsed
+                .get("type")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let path = parsed
+                .get("coordinates")
+                .and_then(parse_geojson_coordinates);
+            (geometry_type, path)
+        }
+        None => (None, None),
+    }
 }
 
 fn parse_path_geojson(path_geojson: Option<String>) -> Option<Vec<CoordinatePoint>> {
@@ -368,17 +387,79 @@ fn parse_path_geojson(path_geojson: Option<String>) -> Option<Vec<CoordinatePoin
     }
 }
 
+fn parse_geojson_path(raw: Option<String>) -> Option<Vec<CoordinatePoint>> {
+    let raw = raw?;
+    let parsed: Value = serde_json::from_str(&raw).ok()?;
+    let coordinates = parsed.get("coordinates")?;
+    parse_geojson_coordinates(coordinates)
+}
+
+fn parse_geojson_coordinates(value: &Value) -> Option<Vec<CoordinatePoint>> {
+    if let Value::Array(arr) = value {
+        if arr.is_empty() {
+            return None;
+        }
+
+        if arr.iter().all(|item| item.is_number()) {
+            return parse_coordinate_point(arr);
+        }
+
+        let mut points = Vec::new();
+        for item in arr {
+            if let Some(mut nested) = parse_geojson_coordinates(item) {
+                points.append(&mut nested);
+            }
+        }
+
+        if points.is_empty() {
+            None
+        } else {
+            Some(points)
+        }
+    } else {
+        None
+    }
+}
+
+fn parse_coordinate_point(arr: &[Value]) -> Option<Vec<CoordinatePoint>> {
+    if arr.len() >= 2 {
+        let lon = arr[0].as_f64();
+        let lat = arr[1].as_f64();
+        if lat.is_some() && lon.is_some() {
+            return Some(vec![CoordinatePoint {
+                latitude: lat,
+                longitude: lon,
+            }]);
+        }
+    }
+    None
+}
+
+fn parse_first_ski_area(raw: Option<String>) -> Option<String> {
+    let raw = raw?;
+    let parsed: Value = serde_json::from_str(&raw).ok()?;
+
+    if let Some(array) = parsed.as_array() {
+        for item in array {
+            if let Some(value) = item.as_str() {
+                return Some(value.to_string());
+            }
+            if let Some(id) = item.get("id").and_then(|v| v.as_str()) {
+                return Some(id.to_string());
+            }
+        }
+    }
+
+    parsed.as_str().map(|s| s.to_string())
+}
+
 async fn load_lifts_by_resort(db: &MySqlPool) -> Result<HashMap<String, Vec<LiftSummary>>, Error> {
     let rows = sqlx::query!(
         r#"
-        SELECT id, resort_id, name, lift_type,
-               CAST(lat_start AS DOUBLE) AS lat_start, CAST(lon_start AS DOUBLE) AS lon_start,
-               CAST(lat_end AS DOUBLE) AS lat_end, CAST(lon_end AS DOUBLE) AS lon_end,
-               operational_status, operational_note,
-               DATE_FORMAT(planned_open_time, '%H:%i:%s') AS planned_open_time,
-               DATE_FORMAT(planned_close_time, '%H:%i:%s') AS planned_close_time,
-               DATE_FORMAT(status_updated_at, '%Y-%m-%dT%H:%i:%sZ') AS status_updated_at
-        FROM lifts
+        SELECT id, name, lift_type, `type` AS feature_type, status,
+               CAST(geometry AS CHAR) AS geometry_json,
+               CAST(ski_areas AS CHAR) AS ski_areas_json
+        FROM geojson_lifts
         "#
     )
     .fetch_all(db)
@@ -386,46 +467,54 @@ async fn load_lifts_by_resort(db: &MySqlPool) -> Result<HashMap<String, Vec<Lift
 
     let mut map: HashMap<String, Vec<LiftSummary>> = HashMap::new();
     for row in rows {
-        map.entry(row.resort_id.clone())
-            .or_default()
-            .push(LiftSummary {
+        let (_geometry_type, path) = parse_geojson_geometry(row.geometry_json);
+        let start = path
+            .as_ref()
+            .and_then(|points| points.first().cloned())
+            .unwrap_or(CoordinatePoint {
+                latitude: None,
+                longitude: None,
+            });
+        let end = path
+            .as_ref()
+            .and_then(|points| points.last().cloned())
+            .unwrap_or(CoordinatePoint {
+                latitude: None,
+                longitude: None,
+            });
+
+        if let Some(resort_key) = parse_first_ski_area(row.ski_areas_json) {
+            map.entry(resort_key).or_default().push(LiftSummary {
                 id: row.id,
                 name: row.name,
-                lift_type: row.lift_type,
-                geometry: LineGeometry {
-                    start: CoordinatePoint {
-                        latitude: row.lat_start,
-                        longitude: row.lon_start,
-                    },
-                    end: CoordinatePoint {
-                        latitude: row.lat_end,
-                        longitude: row.lon_end,
-                    },
-                    path: None,
-                },
+                lift_type: row
+                    .lift_type
+                    .or(row.feature_type)
+                    .unwrap_or_else(|| "Unknown".to_string()),
+                geometry: LineGeometry { start, end, path },
                 status: LiftStatusSummary {
-                    operational_status: row.operational_status,
-                    note: row.operational_note,
-                    planned_open_time: row.planned_open_time,
-                    planned_close_time: row.planned_close_time,
-                    updated_at: row.status_updated_at,
+                    operational_status: row.status.unwrap_or_else(|| "Unknown".to_string()),
+                    note: None,
+                    planned_open_time: None,
+                    planned_close_time: None,
+                    updated_at: None,
                 },
             });
+        }
     }
 
     Ok(map)
 }
 
-async fn load_slopes_by_resort(db: &MySqlPool) -> Result<HashMap<String, Vec<SlopeSummary>>, Error> {
+async fn load_slopes_by_resort(
+    db: &MySqlPool,
+) -> Result<HashMap<String, Vec<SlopeSummary>>, Error> {
     let rows = sqlx::query!(
         r#"
-        SELECT id, resort_id, name, difficulty,
-               CAST(lat_start AS DOUBLE) AS lat_start, CAST(lon_start AS DOUBLE) AS lon_start,
-               CAST(lat_end AS DOUBLE) AS lat_end, CAST(lon_end AS DOUBLE) AS lon_end,
-               CAST(path_geojson AS CHAR) AS path_geojson,
-               operational_status, grooming_status, operational_note,
-               DATE_FORMAT(status_updated_at, '%Y-%m-%dT%H:%i:%sZ') AS status_updated_at
-        FROM slopes
+        SELECT id, name, difficulty, status, grooming, snowmaking, lit, patrolled,
+               difficulty_convention, CAST(geometry AS CHAR) AS geometry_json,
+               CAST(ski_areas AS CHAR) AS ski_areas_json
+        FROM geojson_runs
         "#
     )
     .fetch_all(db)
@@ -433,30 +522,36 @@ async fn load_slopes_by_resort(db: &MySqlPool) -> Result<HashMap<String, Vec<Slo
 
     let mut map: HashMap<String, Vec<SlopeSummary>> = HashMap::new();
     for row in rows {
-        map.entry(row.resort_id.clone())
-            .or_default()
-            .push(SlopeSummary {
+        let (_geometry_type, path) = parse_geojson_geometry(row.geometry_json);
+        let start = path
+            .as_ref()
+            .and_then(|points| points.first().cloned())
+            .unwrap_or(CoordinatePoint {
+                latitude: None,
+                longitude: None,
+            });
+        let end = path
+            .as_ref()
+            .and_then(|points| points.last().cloned())
+            .unwrap_or(CoordinatePoint {
+                latitude: None,
+                longitude: None,
+            });
+
+        if let Some(resort_key) = parse_first_ski_area(row.ski_areas_json) {
+            map.entry(resort_key).or_default().push(SlopeSummary {
                 id: row.id,
                 name: row.name,
-                difficulty: row.difficulty,
-                geometry: LineGeometry {
-                    start: CoordinatePoint {
-                        latitude: row.lat_start,
-                        longitude: row.lon_start,
-                    },
-                    end: CoordinatePoint {
-                        latitude: row.lat_end,
-                        longitude: row.lon_end,
-                    },
-                    path: parse_path_geojson(row.path_geojson),
-                },
+                difficulty: row.difficulty.unwrap_or_else(|| "Unknown".to_string()),
+                geometry: LineGeometry { start, end, path },
                 status: SlopeStatusSummary {
-                    operational_status: row.operational_status,
-                    grooming_status: row.grooming_status,
-                    note: row.operational_note,
-                    updated_at: row.status_updated_at,
+                    operational_status: row.status.unwrap_or_else(|| "Unknown".to_string()),
+                    grooming_status: row.grooming.unwrap_or_else(|| "Unknown".to_string()),
+                    note: None,
+                    updated_at: None,
                 },
             });
+        }
     }
 
     Ok(map)
@@ -491,15 +586,33 @@ pub async fn get_resorts(
 
     let resorts_result = sqlx::query!(
         r#"
-        SELECT id, name, country, region, continent,
-               CAST(latitude AS DOUBLE) AS latitude, CAST(longitude AS DOUBLE) AS longitude,
-               village_altitude_m, min_altitude_m, max_altitude_m, ski_area_name, ski_area_type,
-               official_website, lift_status_url, slope_status_url, snow_report_url, weather_url, status_provider,
-               DATE_FORMAT(status_last_scraped_at, '%Y-%m-%dT%H:%i:%sZ') AS status_last_scraped_at,
-               lifts_open_count, slopes_open_count,
-               snow_depth_valley_cm, snow_depth_mountain_cm, new_snow_24h_cm,
-               CAST(temperature_valley_c AS DOUBLE) AS temperature_valley_c,
-               CAST(temperature_mountain_c AS DOUBLE) AS temperature_mountain_c
+        SELECT
+            id,
+            name,
+            NULL AS country,
+            NULL AS region,
+            NULL AS continent,
+            NULL AS latitude,
+            NULL AS longitude,
+            NULL AS village_altitude_m,
+            NULL AS min_altitude_m,
+            NULL AS max_altitude_m,
+            NULL AS ski_area_name,
+            NULL AS ski_area_type,
+            NULL AS official_website,
+            NULL AS lift_status_url,
+            NULL AS slope_status_url,
+            NULL AS snow_report_url,
+            NULL AS weather_url,
+            NULL AS status_provider,
+            NULL AS status_last_scraped_at,
+            NULL AS lifts_open_count,
+            NULL AS slopes_open_count,
+            NULL AS snow_depth_valley_cm,
+            NULL AS snow_depth_mountain_cm,
+            NULL AS new_snow_24h_cm,
+            NULL AS temperature_valley_c,
+            NULL AS temperature_mountain_c
         FROM resorts
         ORDER BY name
         "#
@@ -522,7 +635,7 @@ pub async fn get_resorts(
                 min_altitude_m: row.min_altitude_m,
                 max_altitude_m: row.max_altitude_m,
                 ski_area_name: row.ski_area_name,
-                ski_area_type: Some(row.ski_area_type),
+                ski_area_type: row.ski_area_type,
                 official_website: row.official_website,
                 lift_status_url: row.lift_status_url,
                 slope_status_url: row.slope_status_url,
@@ -556,7 +669,10 @@ pub async fn get_resorts(
         .into_iter()
         .map(|resort| {
             let lifts = lifts_by_resort.get(&resort.id).cloned().unwrap_or_default();
-            let slopes = slopes_by_resort.get(&resort.id).cloned().unwrap_or_default();
+            let slopes = slopes_by_resort
+                .get(&resort.id)
+                .cloned()
+                .unwrap_or_default();
             ResortWithRelations::from_resort(resort, lifts, slopes)
         })
         .collect();
@@ -564,21 +680,36 @@ pub async fn get_resorts(
     HttpResponse::Ok().json(response)
 }
 
-pub async fn get_resort(
-    db: web::Data<MySqlPool>,
-    id: web::Path<String>,
-) -> impl Responder {
+pub async fn get_resort(db: web::Data<MySqlPool>, id: web::Path<String>) -> impl Responder {
     let resort_result = sqlx::query!(
         r#"
-        SELECT id, name, country, region, continent,
-               CAST(latitude AS DOUBLE) AS latitude, CAST(longitude AS DOUBLE) AS longitude,
-               village_altitude_m, min_altitude_m, max_altitude_m, ski_area_name, ski_area_type,
-               official_website, lift_status_url, slope_status_url, snow_report_url, weather_url, status_provider,
-               DATE_FORMAT(status_last_scraped_at, '%Y-%m-%dT%H:%i:%sZ') AS status_last_scraped_at,
-               lifts_open_count, slopes_open_count,
-               snow_depth_valley_cm, snow_depth_mountain_cm, new_snow_24h_cm,
-               CAST(temperature_valley_c AS DOUBLE) AS temperature_valley_c,
-               CAST(temperature_mountain_c AS DOUBLE) AS temperature_mountain_c
+        SELECT
+            id,
+            name,
+            NULL AS country,
+            NULL AS region,
+            NULL AS continent,
+            NULL AS latitude,
+            NULL AS longitude,
+            NULL AS village_altitude_m,
+            NULL AS min_altitude_m,
+            NULL AS max_altitude_m,
+            NULL AS ski_area_name,
+            NULL AS ski_area_type,
+            NULL AS official_website,
+            NULL AS lift_status_url,
+            NULL AS slope_status_url,
+            NULL AS snow_report_url,
+            NULL AS weather_url,
+            NULL AS status_provider,
+            NULL AS status_last_scraped_at,
+            NULL AS lifts_open_count,
+            NULL AS slopes_open_count,
+            NULL AS snow_depth_valley_cm,
+            NULL AS snow_depth_mountain_cm,
+            NULL AS new_snow_24h_cm,
+            NULL AS temperature_valley_c,
+            NULL AS temperature_mountain_c
         FROM resorts
         WHERE id = ?
         "#,
@@ -600,7 +731,7 @@ pub async fn get_resort(
             min_altitude_m: row.min_altitude_m,
             max_altitude_m: row.max_altitude_m,
             ski_area_name: row.ski_area_name,
-            ski_area_type: Some(row.ski_area_type),
+            ski_area_type: row.ski_area_type,
             official_website: row.official_website,
             lift_status_url: row.lift_status_url,
             slope_status_url: row.slope_status_url,
@@ -623,15 +754,10 @@ pub async fn get_resort(
 
     let lifts_result = sqlx::query!(
         r#"
-        SELECT id, name, lift_type,
-               CAST(lat_start AS DOUBLE) AS lat_start, CAST(lon_start AS DOUBLE) AS lon_start,
-               CAST(lat_end AS DOUBLE) AS lat_end, CAST(lon_end AS DOUBLE) AS lon_end,
-               operational_status, operational_note,
-               DATE_FORMAT(planned_open_time, '%H:%i:%s') AS planned_open_time,
-               DATE_FORMAT(planned_close_time, '%H:%i:%s') AS planned_close_time,
-               DATE_FORMAT(status_updated_at, '%Y-%m-%dT%H:%i:%sZ') AS status_updated_at
-        FROM lifts
-        WHERE resort_id = ?
+        SELECT id, name, lift_type, `type` AS feature_type, status,
+               CAST(geometry AS CHAR) AS geometry_json
+        FROM geojson_lifts
+        WHERE JSON_CONTAINS(ski_areas, JSON_QUOTE(?))
         ORDER BY name
         "#,
         resort.id
@@ -642,28 +768,39 @@ pub async fn get_resort(
     let lifts = match lifts_result {
         Ok(rows) => rows
             .into_iter()
-            .map(|row| LiftSummary {
-                id: row.id,
-                name: row.name,
-                lift_type: row.lift_type,
-                geometry: LineGeometry {
-                    start: CoordinatePoint {
-                        latitude: row.lat_start,
-                        longitude: row.lon_start,
+            .map(|row| {
+                let (_geometry_type, path) = parse_geojson_geometry(row.geometry_json);
+                let start = path
+                    .as_ref()
+                    .and_then(|points| points.first().cloned())
+                    .unwrap_or(CoordinatePoint {
+                        latitude: None,
+                        longitude: None,
+                    });
+                let end = path
+                    .as_ref()
+                    .and_then(|points| points.last().cloned())
+                    .unwrap_or(CoordinatePoint {
+                        latitude: None,
+                        longitude: None,
+                    });
+
+                LiftSummary {
+                    id: row.id,
+                    name: row.name,
+                    lift_type: row
+                        .lift_type
+                        .or(row.feature_type)
+                        .unwrap_or_else(|| "Unknown".to_string()),
+                    geometry: LineGeometry { start, end, path },
+                    status: LiftStatusSummary {
+                        operational_status: row.status.unwrap_or_else(|| "Unknown".to_string()),
+                        note: None,
+                        planned_open_time: None,
+                        planned_close_time: None,
+                        updated_at: None,
                     },
-                    end: CoordinatePoint {
-                        latitude: row.lat_end,
-                        longitude: row.lon_end,
-                    },
-                    path: None,
-                },
-                status: LiftStatusSummary {
-                    operational_status: row.operational_status,
-                    note: row.operational_note,
-                    planned_open_time: row.planned_open_time,
-                    planned_close_time: row.planned_close_time,
-                    updated_at: row.status_updated_at,
-                },
+                }
             })
             .collect(),
         Err(_) => return HttpResponse::InternalServerError().finish(),
@@ -671,14 +808,10 @@ pub async fn get_resort(
 
     let slopes_result = sqlx::query!(
         r#"
-        SELECT id, name, difficulty,
-               CAST(lat_start AS DOUBLE) AS lat_start, CAST(lon_start AS DOUBLE) AS lon_start,
-               CAST(lat_end AS DOUBLE) AS lat_end, CAST(lon_end AS DOUBLE) AS lon_end,
-               CAST(path_geojson AS CHAR) AS path_geojson,
-               operational_status, grooming_status, operational_note,
-               DATE_FORMAT(status_updated_at, '%Y-%m-%dT%H:%i:%sZ') AS status_updated_at
-        FROM slopes
-        WHERE resort_id = ?
+        SELECT id, name, difficulty, status, grooming,
+               CAST(geometry AS CHAR) AS geometry_json
+        FROM geojson_runs
+        WHERE JSON_CONTAINS(ski_areas, JSON_QUOTE(?))
         ORDER BY name
         "#,
         resort.id
@@ -689,27 +822,35 @@ pub async fn get_resort(
     let slopes = match slopes_result {
         Ok(rows) => rows
             .into_iter()
-            .map(|row| SlopeSummary {
-                id: row.id,
-                name: row.name,
-                difficulty: row.difficulty,
-                geometry: LineGeometry {
-                    start: CoordinatePoint {
-                        latitude: row.lat_start,
-                        longitude: row.lon_start,
+            .map(|row| {
+                let (_geometry_type, path) = parse_geojson_geometry(row.geometry_json);
+                let start = path
+                    .as_ref()
+                    .and_then(|points| points.first().cloned())
+                    .unwrap_or(CoordinatePoint {
+                        latitude: None,
+                        longitude: None,
+                    });
+                let end = path
+                    .as_ref()
+                    .and_then(|points| points.last().cloned())
+                    .unwrap_or(CoordinatePoint {
+                        latitude: None,
+                        longitude: None,
+                    });
+
+                SlopeSummary {
+                    id: row.id,
+                    name: row.name,
+                    difficulty: row.difficulty.unwrap_or_else(|| "Unknown".to_string()),
+                    geometry: LineGeometry { start, end, path },
+                    status: SlopeStatusSummary {
+                        operational_status: row.status.unwrap_or_else(|| "Unknown".to_string()),
+                        grooming_status: row.grooming.unwrap_or_else(|| "Unknown".to_string()),
+                        note: None,
+                        updated_at: None,
                     },
-                    end: CoordinatePoint {
-                        latitude: row.lat_end,
-                        longitude: row.lon_end,
-                    },
-                    path: parse_path_geojson(row.path_geojson),
-                },
-                status: SlopeStatusSummary {
-                    operational_status: row.operational_status,
-                    grooming_status: row.grooming_status,
-                    note: row.operational_note,
-                    updated_at: row.status_updated_at,
-                },
+                }
             })
             .collect(),
         Err(_) => return HttpResponse::InternalServerError().finish(),
@@ -720,119 +861,23 @@ pub async fn get_resort(
 }
 
 pub async fn create_resort(
-    db: web::Data<MySqlPool>,
-    resort: web::Json<CreateResort>,
+    _db: web::Data<MySqlPool>,
+    _resort: web::Json<CreateResort>,
 ) -> impl Responder {
-    let result = sqlx::query!(
-        r#"
-        INSERT INTO resorts
-        (id, name, country, region, continent,
-         latitude, longitude, village_altitude_m,
-         min_altitude_m, max_altitude_m, ski_area_name, ski_area_type,
-         official_website, lift_status_url, slope_status_url, snow_report_url, weather_url, status_provider,
-         status_last_scraped_at, lifts_open_count, slopes_open_count,
-         snow_depth_valley_cm, snow_depth_mountain_cm, new_snow_24h_cm,
-         temperature_valley_c, temperature_mountain_c)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                ?, ?, ?, ?, ?, ?,
-                ?, ?, ?,
-                ?, ?, ?,
-                ?, ?)
-        "#,
-        resort.id,
-        resort.name,
-        resort.country,
-        resort.region,
-        resort.continent,
-        resort.latitude,
-        resort.longitude,
-        resort.village_altitude_m,
-        resort.min_altitude_m,
-        resort.max_altitude_m,
-        resort.ski_area_name,
-        resort.ski_area_type,
-        resort.official_website,
-        resort.lift_status_url,
-        resort.slope_status_url,
-        resort.snow_report_url,
-        resort.weather_url,
-        resort.status_provider,
-        resort.status_last_scraped_at,
-        resort.lifts_open_count,
-        resort.slopes_open_count,
-        resort.snow_depth_valley_cm,
-        resort.snow_depth_mountain_cm,
-        resort.new_snow_24h_cm,
-        resort.temperature_valley_c,
-        resort.temperature_mountain_c
-    )
-    .execute(db.get_ref())
-    .await;
-
-    match result {
-        Ok(_) => HttpResponse::Created().finish(),
-        Err(_) => HttpResponse::BadRequest().finish(),
-    }
+    HttpResponse::MethodNotAllowed()
+        .body("Create operations are not supported for the current resort schema")
 }
 
 pub async fn update_resort(
-    db: web::Data<MySqlPool>,
-    id: web::Path<String>,
-    resort: web::Json<UpdateResort>,
+    _db: web::Data<MySqlPool>,
+    _id: web::Path<String>,
+    _resort: web::Json<UpdateResort>,
 ) -> impl Responder {
-    let result = sqlx::query!(
-        r#"
-        UPDATE resorts SET
-            name = ?, country = ?, region = ?, continent = ?,
-            latitude = ?, longitude = ?, village_altitude_m = ?,
-            min_altitude_m = ?, max_altitude_m = ?, ski_area_name = ?, ski_area_type = ?,
-            official_website = ?, lift_status_url = ?, slope_status_url = ?, snow_report_url = ?, weather_url = ?, status_provider = ?,
-            status_last_scraped_at = ?, lifts_open_count = ?, slopes_open_count = ?,
-            snow_depth_valley_cm = ?, snow_depth_mountain_cm = ?, new_snow_24h_cm = ?,
-            temperature_valley_c = ?, temperature_mountain_c = ?
-        WHERE id = ?
-        "#,
-        resort.name,
-        resort.country,
-        resort.region,
-        resort.continent,
-        resort.latitude,
-        resort.longitude,
-        resort.village_altitude_m,
-        resort.min_altitude_m,
-        resort.max_altitude_m,
-        resort.ski_area_name,
-        resort.ski_area_type,
-        resort.official_website,
-        resort.lift_status_url,
-        resort.slope_status_url,
-        resort.snow_report_url,
-        resort.weather_url,
-        resort.status_provider,
-        resort.status_last_scraped_at,
-        resort.lifts_open_count,
-        resort.slopes_open_count,
-        resort.snow_depth_valley_cm,
-        resort.snow_depth_mountain_cm,
-        resort.new_snow_24h_cm,
-        resort.temperature_valley_c,
-        resort.temperature_mountain_c,
-        *id
-    )
-    .execute(db.get_ref())
-    .await;
-
-    match result {
-        Ok(res) if res.rows_affected() == 0 => HttpResponse::NotFound().finish(),
-        Ok(_) => HttpResponse::Ok().finish(),
-        Err(_) => HttpResponse::BadRequest().finish(),
-    }
+    HttpResponse::MethodNotAllowed()
+        .body("Update operations are not supported for the current resort schema")
 }
 
-pub async fn delete_resort(
-    db: web::Data<MySqlPool>,
-    id: web::Path<String>,
-) -> impl Responder {
+pub async fn delete_resort(db: web::Data<MySqlPool>, id: web::Path<String>) -> impl Responder {
     let result = sqlx::query!("DELETE FROM resorts WHERE id = ?", *id)
         .execute(db.get_ref())
         .await;

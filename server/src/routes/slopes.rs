@@ -122,38 +122,39 @@
 //! Author: OpenSlope Team
 //! Version: 1.0.0
 
-use actix_web::{web, HttpResponse, Responder};
-use serde::{Deserialize, Serialize};
+use actix_web::{HttpResponse, Responder, web};
+use serde::Serialize;
 use serde_json::Value;
 use sqlx::MySqlPool;
 
 #[derive(Serialize)]
 pub struct Slope {
-    pub id: i64,
-    pub resort_id: String,
+    pub id: String,
+    pub resort_id: Option<String>,
     pub name: Option<String>,
     pub display: SlopeDisplay,
     pub geometry: SlopeGeometry,
     pub specs: SlopeSpecs,
-    pub source: SlopeSource,
+    pub source: Option<SlopeSource>,
+    pub description: Option<String>,
     pub status: SlopeStatus,
 }
 
 #[derive(Serialize)]
 pub struct SlopeDisplay {
     pub normalized_name: Option<String>,
-    pub difficulty: String,
+    pub difficulty: Option<String>,
 }
 
 #[derive(Serialize)]
 pub struct SlopeGeometry {
+    pub geometry_type: Option<String>,
     pub start: CoordinatePoint,
     pub end: CoordinatePoint,
     pub path: Option<Vec<CoordinatePoint>>,
-    pub direction: Option<f64>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 pub struct CoordinatePoint {
     pub latitude: Option<f64>,
     pub longitude: Option<f64>,
@@ -161,87 +162,131 @@ pub struct CoordinatePoint {
 
 #[derive(Serialize)]
 pub struct SlopeSpecs {
-    pub length_m: Option<i32>,
-    pub vertical_drop_m: Option<i32>,
-    pub average_gradient: Option<f64>,
-    pub max_gradient: Option<f64>,
     pub snowmaking: bool,
-    pub night_skiing: bool,
-    pub family_friendly: bool,
-    pub race_slope: bool,
+    pub lit: bool,
+    pub patrolled: bool,
+    pub difficulty_convention: Option<String>,
+    pub grooming: Option<String>,
 }
 
 #[derive(Serialize)]
 pub struct SlopeSource {
-    pub system: String,
+    pub system: Option<String>,
     pub entity_id: Option<String>,
-    pub source_url: Option<String>,
 }
 
 #[derive(Serialize)]
 pub struct SlopeStatus {
-    pub operational_status: String,
-    pub grooming_status: String,
+    pub status: Option<String>,
+    pub grooming_status: Option<String>,
     pub note: Option<String>,
     pub updated_at: Option<String>,
 }
 
-#[derive(Deserialize)]
-pub struct CreateSlope {
-    pub resort_id: String,
-    pub name: Option<String>,
-    pub difficulty: String,
-    pub length_m: Option<i32>,
-    pub vertical_drop_m: Option<i32>,
-    pub average_gradient: Option<f64>,
-    pub max_gradient: Option<f64>,
-    pub snowmaking: Option<bool>,
-    pub night_skiing: Option<bool>,
-    pub family_friendly: Option<bool>,
-    pub race_slope: Option<bool>,
-    pub lat_start: Option<f64>,
-    pub lon_start: Option<f64>,
-    pub lat_end: Option<f64>,
-    pub lon_end: Option<f64>,
-    pub source_system: Option<String>,
-    pub source_entity_id: Option<String>,
-    pub name_normalized: Option<String>,
-    pub operational_status: Option<String>,
-    pub grooming_status: Option<String>,
-    pub operational_note: Option<String>,
-    pub status_updated_at: Option<String>,
-    pub status_source_url: Option<String>,
-    pub slope_path_json: Option<String>,
-    pub direction: Option<f64>,
+fn parse_geojson_geometry(raw: Option<String>) -> (Option<String>, Option<Vec<CoordinatePoint>>) {
+    match raw.and_then(|value| serde_json::from_str::<Value>(&value).ok()) {
+        Some(parsed) => {
+            let geometry_type = parsed
+                .get("type")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let path = parsed.get("coordinates").and_then(flatten_coordinates);
+            (geometry_type, path)
+        }
+        None => (None, None),
+    }
 }
 
-#[derive(Deserialize)]
-pub struct UpdateSlope {
-    pub resort_id: String,
-    pub name: Option<String>,
-    pub difficulty: String,
-    pub length_m: Option<i32>,
-    pub vertical_drop_m: Option<i32>,
-    pub average_gradient: Option<f64>,
-    pub max_gradient: Option<f64>,
-    pub snowmaking: Option<bool>,
-    pub night_skiing: Option<bool>,
-    pub family_friendly: Option<bool>,
-    pub race_slope: Option<bool>,
-    pub lat_start: Option<f64>,
-    pub lon_start: Option<f64>,
-    pub lat_end: Option<f64>,
-    pub lon_end: Option<f64>,
-    pub source_system: Option<String>,
-    pub source_entity_id: Option<String>,
-    pub name_normalized: Option<String>,
-    pub operational_status: Option<String>,
-    pub grooming_status: Option<String>,
-    pub operational_note: Option<String>,
-    pub status_updated_at: Option<String>,
-    pub status_source_url: Option<String>,
-    pub slope_path_json: Option<String>,
-    pub direction: Option<f64>,
+fn flatten_coordinates(value: &Value) -> Option<Vec<CoordinatePoint>> {
+    if let Value::Array(arr) = value {
+        if arr.is_empty() {
+            return None;
+        }
+
+        if arr.iter().all(|item| item.is_number()) {
+            return coordinate_point_from_array(arr);
+        }
+
+        let mut points = Vec::new();
+        for item in arr {
+            if let Some(mut nested) = flatten_coordinates(item) {
+                points.append(&mut nested);
+            }
+        }
+
+        if points.is_empty() {
+            None
+        } else {
+            Some(points)
+        }
+    } else {
+        None
+    }
+}
+
+fn coordinate_point_from_array(arr: &[Value]) -> Option<Vec<CoordinatePoint>> {
+    if arr.len() >= 2 {
+        let lon = arr[0].as_f64();
+        let lat = arr[1].as_f64();
+        if latitude_and_longitude_valid(lat, lon) {
+            return Some(vec![CoordinatePoint {
+                latitude: lat,
+                longitude: lon,
+            }]);
+        }
+    }
+    None
+}
+
+fn latitude_and_longitude_valid(lat: Option<f64>, lon: Option<f64>) -> bool {
+    lat.is_some() && lon.is_some()
+}
+
+fn parse_first_ski_area(raw: Option<String>) -> Option<String> {
+    let raw = raw?;
+    let parsed: Value = serde_json::from_str(&raw).ok()?;
+
+    if let Some(array) = parsed.as_array() {
+        for item in array {
+            if let Some(value) = item.as_str() {
+                return Some(value.to_string());
+            }
+            if let Some(id) = item.get("id").and_then(|v| v.as_str()) {
+                return Some(id.to_string());
+            }
+        }
+    }
+
+    parsed.as_str().map(|s| s.to_string())
+}
+
+fn parse_source_info(raw: Option<String>) -> Option<SlopeSource> {
+    let raw = raw?;
+    let parsed: Value = serde_json::from_str(&raw).ok()?;
+    let source = if parsed.is_array() {
+        parsed.get(0)?
+    } else {
+        &parsed
+    };
+
+    if !source.is_object() {
+        return None;
+    }
+
+    let system = source
+        .get("system")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let entity_id = source
+        .get("entity_id")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    if system.is_none() && entity_id.is_none() {
+        return None;
+    }
+
+    Some(SlopeSource { system, entity_id })
 }
 
 fn parse_path_geojson(path_geojson: Option<String>) -> Option<Vec<CoordinatePoint>> {
@@ -279,19 +324,13 @@ fn parse_path_geojson(path_geojson: Option<String>) -> Option<Vec<CoordinatePoin
 pub async fn get_slopes(db: web::Data<MySqlPool>) -> impl Responder {
     let result = sqlx::query!(
         r#"
-        SELECT id, resort_id, name, difficulty, name_normalized,
-               length_m, vertical_drop_m,
-               CAST(average_gradient AS DOUBLE) AS average_gradient,
-               CAST(max_gradient AS DOUBLE) AS max_gradient,
-               snowmaking, night_skiing, family_friendly, race_slope,
-               CAST(lat_start AS DOUBLE) AS lat_start, CAST(lon_start AS DOUBLE) AS lon_start,
-               CAST(lat_end AS DOUBLE) AS lat_end, CAST(lon_end AS DOUBLE) AS lon_end,
-               CAST(path_geojson AS CHAR) AS path_geojson,
-               CAST(direction AS DOUBLE) AS direction,
-               source_system, source_entity_id, operational_status, grooming_status, operational_note, status_source_url,
-               DATE_FORMAT(status_updated_at, '%Y-%m-%dT%H:%i:%sZ') AS status_updated_at
-        FROM slopes
-        ORDER BY resort_id, name
+        SELECT id, name, difficulty, status, grooming, snowmaking, lit, patrolled,
+               difficulty_convention, description,
+               CAST(geometry AS CHAR) AS geometry_json,
+               CAST(sources AS CHAR) AS sources_json,
+               CAST(ski_areas AS CHAR) AS ski_areas_json
+        FROM geojson_runs
+        ORDER BY name
         "#
     )
     .fetch_all(db.get_ref())
@@ -300,47 +339,53 @@ pub async fn get_slopes(db: web::Data<MySqlPool>) -> impl Responder {
     match result {
         Ok(rows) => HttpResponse::Ok().json(
             rows.into_iter()
-                .map(|row| Slope {
-                    id: row.id,
-                    resort_id: row.resort_id,
-                    name: row.name,
-                    display: SlopeDisplay {
-                        normalized_name: row.name_normalized,
-                        difficulty: row.difficulty,
-                    },
-                    geometry: SlopeGeometry {
-                        start: CoordinatePoint {
-                            latitude: row.lat_start,
-                            longitude: row.lon_start,
+                .map(|row| {
+                    let (geometry_type, path) = parse_geojson_geometry(row.geometry_json);
+                    let start = path
+                        .as_ref()
+                        .and_then(|points| points.first().cloned())
+                        .unwrap_or(CoordinatePoint {
+                            latitude: None,
+                            longitude: None,
+                        });
+                    let end = path
+                        .as_ref()
+                        .and_then(|points| points.last().cloned())
+                        .unwrap_or(CoordinatePoint {
+                            latitude: None,
+                            longitude: None,
+                        });
+
+                    Slope {
+                        id: row.id,
+                        resort_id: parse_first_ski_area(row.ski_areas_json),
+                        name: row.name,
+                        display: SlopeDisplay {
+                            normalized_name: None,
+                            difficulty: row.difficulty,
                         },
-                        end: CoordinatePoint {
-                            latitude: row.lat_end,
-                            longitude: row.lon_end,
+                        geometry: SlopeGeometry {
+                            geometry_type,
+                            start,
+                            end,
+                            path,
                         },
-                        direction: row.direction,
-                        path: parse_path_geojson(row.path_geojson),
-                    },
-                    specs: SlopeSpecs {
-                        length_m: row.length_m,
-                        vertical_drop_m: row.vertical_drop_m,
-                        average_gradient: row.average_gradient,
-                        max_gradient: row.max_gradient,
-                        snowmaking: row.snowmaking.unwrap_or(0) != 0,
-                        night_skiing: row.night_skiing.unwrap_or(0) != 0,
-                        family_friendly: row.family_friendly.unwrap_or(0) != 0,
-                        race_slope: row.race_slope.unwrap_or(0) != 0,
-                    },
-                    source: SlopeSource {
-                        system: row.source_system,
-                        entity_id: row.source_entity_id,
-                        source_url: row.status_source_url,
-                    },
-                    status: SlopeStatus {
-                        operational_status: row.operational_status,
-                        grooming_status: row.grooming_status,
-                        note: row.operational_note,
-                        updated_at: row.status_updated_at,
-                    },
+                        specs: SlopeSpecs {
+                            snowmaking: row.snowmaking.unwrap_or(false),
+                            lit: row.lit.unwrap_or(false),
+                            patrolled: row.patrolled.unwrap_or(false),
+                            difficulty_convention: row.difficulty_convention,
+                            grooming: row.grooming,
+                        },
+                        source: parse_source_info(row.sources_json),
+                        description: row.description,
+                        status: SlopeStatus {
+                            status: row.status,
+                            grooming_status: row.grooming,
+                            note: None,
+                            updated_at: None,
+                        },
+                    }
                 })
                 .collect::<Vec<Slope>>(),
         ),
@@ -351,71 +396,71 @@ pub async fn get_slopes(db: web::Data<MySqlPool>) -> impl Responder {
     }
 }
 
-pub async fn get_slope(db: web::Data<MySqlPool>, id: web::Path<i64>) -> impl Responder {
+pub async fn get_slope(db: web::Data<MySqlPool>, id: web::Path<String>) -> impl Responder {
     let result = sqlx::query!(
         r#"
-        SELECT id, resort_id, name, difficulty, name_normalized,
-               length_m, vertical_drop_m,
-               CAST(average_gradient AS DOUBLE) AS average_gradient,
-               CAST(max_gradient AS DOUBLE) AS max_gradient,
-               snowmaking, night_skiing, family_friendly, race_slope,
-               CAST(lat_start AS DOUBLE) AS lat_start, CAST(lon_start AS DOUBLE) AS lon_start,
-               CAST(lat_end AS DOUBLE) AS lat_end, CAST(lon_end AS DOUBLE) AS lon_end,
-               CAST(path_geojson AS CHAR) AS path_geojson,
-               CAST(direction AS DOUBLE) AS direction,
-               source_system, source_entity_id, operational_status, grooming_status, operational_note, status_source_url,
-               DATE_FORMAT(status_updated_at, '%Y-%m-%dT%H:%i:%sZ') AS status_updated_at
-        FROM slopes
+        SELECT id, name, difficulty, status, grooming, snowmaking, lit, patrolled,
+               difficulty_convention, description,
+               CAST(geometry AS CHAR) AS geometry_json,
+               CAST(sources AS CHAR) AS sources_json,
+               CAST(ski_areas AS CHAR) AS ski_areas_json
+        FROM geojson_runs
         WHERE id = ?
         "#,
-        *id
+        id.into_inner()
     )
     .fetch_optional(db.get_ref())
     .await;
 
     match result {
-        Ok(Some(row)) => HttpResponse::Ok().json(Slope {
-            id: row.id,
-            resort_id: row.resort_id,
-            name: row.name,
-            display: SlopeDisplay {
-                normalized_name: row.name_normalized,
-                difficulty: row.difficulty,
-            },
-            geometry: SlopeGeometry {
-                start: CoordinatePoint {
-                    latitude: row.lat_start,
-                    longitude: row.lon_start,
+        Ok(Some(row)) => {
+            let (geometry_type, path) = parse_geojson_geometry(row.geometry_json);
+            let start = path
+                .as_ref()
+                .and_then(|points| points.first().cloned())
+                .unwrap_or(CoordinatePoint {
+                    latitude: None,
+                    longitude: None,
+                });
+            let end = path
+                .as_ref()
+                .and_then(|points| points.last().cloned())
+                .unwrap_or(CoordinatePoint {
+                    latitude: None,
+                    longitude: None,
+                });
+
+            HttpResponse::Ok().json(Slope {
+                id: row.id,
+                resort_id: parse_first_ski_area(row.ski_areas_json),
+                name: row.name,
+                display: SlopeDisplay {
+                    normalized_name: None,
+                    difficulty: row.difficulty,
                 },
-                end: CoordinatePoint {
-                    latitude: row.lat_end,
-                    longitude: row.lon_end,
+                geometry: SlopeGeometry {
+                    geometry_type,
+                    start,
+                    end,
+                    path,
                 },
-                direction: row.direction,
-                path: parse_path_geojson(row.path_geojson),
-            },
-            specs: SlopeSpecs {
-                length_m: row.length_m,
-                vertical_drop_m: row.vertical_drop_m,
-                average_gradient: row.average_gradient,
-                max_gradient: row.max_gradient,
-                snowmaking: row.snowmaking.unwrap_or(0) != 0,
-                night_skiing: row.night_skiing.unwrap_or(0) != 0,
-                family_friendly: row.family_friendly.unwrap_or(0) != 0,
-                race_slope: row.race_slope.unwrap_or(0) != 0,
-            },
-            source: SlopeSource {
-                system: row.source_system,
-                entity_id: row.source_entity_id,
-                source_url: row.status_source_url,
-            },
-            status: SlopeStatus {
-                operational_status: row.operational_status,
-                grooming_status: row.grooming_status,
-                note: row.operational_note,
-                updated_at: row.status_updated_at,
-            },
-        }),
+                specs: SlopeSpecs {
+                    snowmaking: row.snowmaking.unwrap_or(false),
+                    lit: row.lit.unwrap_or(false),
+                    patrolled: row.patrolled.unwrap_or(false),
+                    difficulty_convention: row.difficulty_convention,
+                    grooming: row.grooming,
+                },
+                source: parse_source_info(row.sources_json),
+                description: row.description,
+                status: SlopeStatus {
+                    status: row.status,
+                    grooming_status: row.grooming,
+                    note: None,
+                    updated_at: None,
+                },
+            })
+        }
         Ok(None) => HttpResponse::NotFound().finish(),
         Err(err) => {
             eprintln!("GET /slopes/{{id}} error: {:?}", err);
@@ -430,19 +475,13 @@ pub async fn get_slopes_by_resort(
 ) -> impl Responder {
     let result = sqlx::query!(
         r#"
-        SELECT id, resort_id, name, difficulty, name_normalized,
-               length_m, vertical_drop_m,
-               CAST(average_gradient AS DOUBLE) AS average_gradient,
-               CAST(max_gradient AS DOUBLE) AS max_gradient,
-               snowmaking, night_skiing, family_friendly, race_slope,
-               CAST(lat_start AS DOUBLE) AS lat_start, CAST(lon_start AS DOUBLE) AS lon_start,
-               CAST(lat_end AS DOUBLE) AS lat_end, CAST(lon_end AS DOUBLE) AS lon_end,
-               CAST(path_geojson AS CHAR) AS path_geojson,
-               CAST(direction AS DOUBLE) AS direction,
-               source_system, source_entity_id, operational_status, grooming_status, operational_note, status_source_url,
-               DATE_FORMAT(status_updated_at, '%Y-%m-%dT%H:%i:%sZ') AS status_updated_at
-        FROM slopes
-        WHERE resort_id = ?
+        SELECT id, name, difficulty, status, grooming, snowmaking, lit, patrolled,
+               difficulty_convention, description,
+               CAST(geometry AS CHAR) AS geometry_json,
+               CAST(sources AS CHAR) AS sources_json,
+               CAST(ski_areas AS CHAR) AS ski_areas_json
+        FROM geojson_runs
+        WHERE JSON_CONTAINS(ski_areas, JSON_QUOTE(?))
         ORDER BY name
         "#,
         resort_id.into_inner()
@@ -453,47 +492,53 @@ pub async fn get_slopes_by_resort(
     match result {
         Ok(rows) => HttpResponse::Ok().json(
             rows.into_iter()
-                .map(|row| Slope {
-                    id: row.id,
-                    resort_id: row.resort_id,
-                    name: row.name,
-                    display: SlopeDisplay {
-                        normalized_name: row.name_normalized,
-                        difficulty: row.difficulty,
-                    },
-                    geometry: SlopeGeometry {
-                        start: CoordinatePoint {
-                            latitude: row.lat_start,
-                            longitude: row.lon_start,
+                .map(|row| {
+                    let (geometry_type, path) = parse_geojson_geometry(row.geometry_json);
+                    let start = path
+                        .as_ref()
+                        .and_then(|points| points.first().cloned())
+                        .unwrap_or(CoordinatePoint {
+                            latitude: None,
+                            longitude: None,
+                        });
+                    let end = path
+                        .as_ref()
+                        .and_then(|points| points.last().cloned())
+                        .unwrap_or(CoordinatePoint {
+                            latitude: None,
+                            longitude: None,
+                        });
+
+                    Slope {
+                        id: row.id,
+                        resort_id: parse_first_ski_area(row.ski_areas_json),
+                        name: row.name,
+                        display: SlopeDisplay {
+                            normalized_name: None,
+                            difficulty: row.difficulty,
                         },
-                        end: CoordinatePoint {
-                            latitude: row.lat_end,
-                            longitude: row.lon_end,
+                        geometry: SlopeGeometry {
+                            geometry_type,
+                            start,
+                            end,
+                            path,
                         },
-                        direction: row.direction,
-                        path: parse_path_geojson(row.path_geojson),
-                    },
-                    specs: SlopeSpecs {
-                        length_m: row.length_m,
-                        vertical_drop_m: row.vertical_drop_m,
-                        average_gradient: row.average_gradient,
-                        max_gradient: row.max_gradient,
-                        snowmaking: row.snowmaking.unwrap_or(0) != 0,
-                        night_skiing: row.night_skiing.unwrap_or(0) != 0,
-                        family_friendly: row.family_friendly.unwrap_or(0) != 0,
-                        race_slope: row.race_slope.unwrap_or(0) != 0,
-                    },
-                    source: SlopeSource {
-                        system: row.source_system,
-                        entity_id: row.source_entity_id,
-                        source_url: row.status_source_url,
-                    },
-                    status: SlopeStatus {
-                        operational_status: row.operational_status,
-                        grooming_status: row.grooming_status,
-                        note: row.operational_note,
-                        updated_at: row.status_updated_at,
-                    },
+                        specs: SlopeSpecs {
+                            snowmaking: row.snowmaking.unwrap_or(false),
+                            lit: row.lit.unwrap_or(false),
+                            patrolled: row.patrolled.unwrap_or(false),
+                            difficulty_convention: row.difficulty_convention,
+                            grooming: row.grooming,
+                        },
+                        source: parse_source_info(row.sources_json),
+                        description: row.description,
+                        status: SlopeStatus {
+                            status: row.status,
+                            grooming_status: row.grooming,
+                            note: None,
+                            updated_at: None,
+                        },
+                    }
                 })
                 .collect::<Vec<Slope>>(),
         ),
@@ -504,151 +549,25 @@ pub async fn get_slopes_by_resort(
     }
 }
 
-pub async fn create_slope(
-    db: web::Data<MySqlPool>,
-    slope: web::Json<CreateSlope>,
-) -> impl Responder {
-    let result = sqlx::query!(
-        r#"
-        INSERT INTO slopes
-        (resort_id, name, difficulty,
-         length_m, vertical_drop_m, average_gradient, max_gradient,
-         snowmaking, night_skiing, family_friendly, race_slope,
-         lat_start, lon_start, lat_end, lon_end, path_geojson, direction,
-         source_system, source_entity_id, name_normalized,
-         operational_status, grooming_status, operational_note, status_updated_at, status_source_url)
-        VALUES (?, ?, ?,
-                ?, ?, ?, ?,
-                ?, ?, ?, ?,
-                ?, ?, ?, ?, ?, ?,
-                ?, ?, ?,
-                ?, ?, ?, ?, ?)
-        "#,
-        slope.resort_id,
-        slope.name,
-        slope.difficulty,
-        slope.length_m,
-        slope.vertical_drop_m,
-        slope.average_gradient,
-        slope.max_gradient,
-        slope.snowmaking.unwrap_or(false),
-        slope.night_skiing.unwrap_or(false),
-        slope.family_friendly.unwrap_or(false),
-        slope.race_slope.unwrap_or(false),
-        slope.lat_start,
-        slope.lon_start,
-        slope.lat_end,
-        slope.lon_end,
-        slope.slope_path_json,
-        slope.direction,
-        slope.source_system.as_deref().unwrap_or("osm"),
-        slope.source_entity_id,
-        slope.name_normalized,
-        slope.operational_status.as_deref().unwrap_or("unknown"),
-        slope.grooming_status.as_deref().unwrap_or("unknown"),
-        slope.operational_note,
-        slope.status_updated_at,
-        slope.status_source_url
-    )
-    .execute(db.get_ref())
-    .await;
-
-    match result {
-        Ok(res) => HttpResponse::Created().json(res.last_insert_id()),
-        Err(err) => {
-            eprintln!("POST /slopes error: {:?}", err);
-            HttpResponse::BadRequest().finish()
-        }
-    }
+pub async fn create_slope(_db: web::Data<MySqlPool>) -> impl Responder {
+    HttpResponse::MethodNotAllowed()
+        .body("Create operations are not supported for geojson import slope data")
 }
 
-pub async fn update_slope(
-    db: web::Data<MySqlPool>,
-    id: web::Path<i64>,
-    slope: web::Json<UpdateSlope>,
-) -> impl Responder {
-    let result = sqlx::query!(
-        r#"
-        UPDATE slopes
-        SET resort_id = ?, name = ?, difficulty = ?,
-            length_m = ?, vertical_drop_m = ?, average_gradient = ?, max_gradient = ?,
-            snowmaking = ?, night_skiing = ?, family_friendly = ?, race_slope = ?,
-            lat_start = ?, lon_start = ?, lat_end = ?, lon_end = ?, path_geojson = COALESCE(?, path_geojson), direction = ?,
-            source_system = ?, source_entity_id = ?, name_normalized = ?,
-            operational_status = ?, grooming_status = ?, operational_note = ?, status_updated_at = ?, status_source_url = ?
-        WHERE id = ?
-        "#,
-        slope.resort_id,
-        slope.name,
-        slope.difficulty,
-        slope.length_m,
-        slope.vertical_drop_m,
-        slope.average_gradient,
-        slope.max_gradient,
-        slope.snowmaking.unwrap_or(false),
-        slope.night_skiing.unwrap_or(false),
-        slope.family_friendly.unwrap_or(false),
-        slope.race_slope.unwrap_or(false),
-        slope.lat_start,
-        slope.lon_start,
-        slope.lat_end,
-        slope.lon_end,
-        slope.slope_path_json,
-        slope.direction,
-        slope.source_system.as_deref().unwrap_or("osm"),
-        slope.source_entity_id,
-        slope.name_normalized,
-        slope.operational_status.as_deref().unwrap_or("unknown"),
-        slope.grooming_status.as_deref().unwrap_or("unknown"),
-        slope.operational_note,
-        slope.status_updated_at,
-        slope.status_source_url,
-        *id
-    )
-    .execute(db.get_ref())
-    .await;
-
-    match result {
-        Ok(res) if res.rows_affected() == 0 => HttpResponse::NotFound().finish(),
-        Ok(_) => HttpResponse::Ok().finish(),
-        Err(err) => {
-            eprintln!("PUT /slopes/{{id}} error: {:?}", err);
-            HttpResponse::BadRequest().finish()
-        }
-    }
+pub async fn update_slope(_db: web::Data<MySqlPool>, _id: web::Path<String>) -> impl Responder {
+    HttpResponse::MethodNotAllowed()
+        .body("Update operations are not supported for geojson import slope data")
 }
 
-pub async fn delete_slope(
-    db: web::Data<MySqlPool>,
-    id: web::Path<i64>,
-) -> impl Responder {
-    let result = sqlx::query!("DELETE FROM slopes WHERE id = ?", *id)
-        .execute(db.get_ref())
-        .await;
-
-    match result {
-        Ok(res) if res.rows_affected() == 0 => HttpResponse::NotFound().finish(),
-        Ok(_) => HttpResponse::NoContent().finish(),
-        Err(err) => {
-            eprintln!("DELETE /slopes/{{id}} error: {:?}", err);
-            HttpResponse::BadRequest().finish()
-        }
-    }
+pub async fn delete_slope(_db: web::Data<MySqlPool>, _id: web::Path<String>) -> impl Responder {
+    HttpResponse::MethodNotAllowed()
+        .body("Delete operations are not supported for geojson import slope data")
 }
 
 pub async fn delete_slopes_by_resort(
-    db: web::Data<MySqlPool>,
-    resort_id: web::Path<String>,
+    _db: web::Data<MySqlPool>,
+    _resort_id: web::Path<String>,
 ) -> impl Responder {
-    let result: Result<sqlx::mysql::MySqlQueryResult, sqlx::Error> = sqlx::query!("DELETE FROM slopes WHERE resort_id = ?", resort_id.into_inner())
-        .execute(db.get_ref())
-        .await;
-
-    match result {
-        Ok(res) => HttpResponse::Ok().json(res.rows_affected()),
-        Err(err) => {
-            eprintln!("DELETE /slopes/by_resort error: {:?}", err);
-            HttpResponse::InternalServerError().finish()
-        }
-    }
+    HttpResponse::MethodNotAllowed()
+        .body("Delete operations are not supported for geojson import slope data")
 }
