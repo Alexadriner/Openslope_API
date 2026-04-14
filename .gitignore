@@ -98,3 +98,7 @@ database_backups/
 
 # --- Geojson files ---
 *.geojson
+
+# keep the `data` folder visible in git, but ignore GeoJSON files there
+!/data/
+data/**/*.geojson
