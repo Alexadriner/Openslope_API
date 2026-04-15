@@ -356,6 +356,8 @@ pub async fn get_slopes(db: web::Data<MySqlPool>) -> impl Responder {
                             longitude: None,
                         });
 
+                    let grooming_value = row.grooming.clone();
+
                     Slope {
                         id: row.id,
                         resort_id: parse_first_ski_area(row.ski_areas_json),
@@ -371,17 +373,17 @@ pub async fn get_slopes(db: web::Data<MySqlPool>) -> impl Responder {
                             path,
                         },
                         specs: SlopeSpecs {
-                            snowmaking: row.snowmaking.unwrap_or(false),
-                            lit: row.lit.unwrap_or(false),
-                            patrolled: row.patrolled.unwrap_or(false),
+                            snowmaking: row.snowmaking.map(|v| v != 0).unwrap_or(false),
+                            lit: row.lit.map(|v| v != 0).unwrap_or(false),
+                            patrolled: row.patrolled.map(|v| v != 0).unwrap_or(false),
                             difficulty_convention: row.difficulty_convention,
-                            grooming: row.grooming,
+                            grooming: grooming_value.clone(),
                         },
                         source: parse_source_info(row.sources_json),
                         description: row.description,
                         status: SlopeStatus {
                             status: row.status,
-                            grooming_status: row.grooming,
+                            grooming_status: grooming_value,
                             note: None,
                             updated_at: None,
                         },
@@ -430,6 +432,8 @@ pub async fn get_slope(db: web::Data<MySqlPool>, id: web::Path<String>) -> impl 
                     longitude: None,
                 });
 
+            let grooming_value = row.grooming.clone();
+
             HttpResponse::Ok().json(Slope {
                 id: row.id,
                 resort_id: parse_first_ski_area(row.ski_areas_json),
@@ -445,17 +449,17 @@ pub async fn get_slope(db: web::Data<MySqlPool>, id: web::Path<String>) -> impl 
                     path,
                 },
                 specs: SlopeSpecs {
-                    snowmaking: row.snowmaking.unwrap_or(false),
-                    lit: row.lit.unwrap_or(false),
-                    patrolled: row.patrolled.unwrap_or(false),
+                    snowmaking: row.snowmaking.map(|v| v != 0).unwrap_or(false),
+                    lit: row.lit.map(|v| v != 0).unwrap_or(false),
+                    patrolled: row.patrolled.map(|v| v != 0).unwrap_or(false),
                     difficulty_convention: row.difficulty_convention,
-                    grooming: row.grooming,
+                    grooming: grooming_value.clone(),
                 },
                 source: parse_source_info(row.sources_json),
                 description: row.description,
                 status: SlopeStatus {
                     status: row.status,
-                    grooming_status: row.grooming,
+                    grooming_status: grooming_value,
                     note: None,
                     updated_at: None,
                 },
@@ -509,6 +513,8 @@ pub async fn get_slopes_by_resort(
                             longitude: None,
                         });
 
+                    let grooming_value = row.grooming.clone();
+
                     Slope {
                         id: row.id,
                         resort_id: parse_first_ski_area(row.ski_areas_json),
@@ -524,17 +530,17 @@ pub async fn get_slopes_by_resort(
                             path,
                         },
                         specs: SlopeSpecs {
-                            snowmaking: row.snowmaking.unwrap_or(false),
-                            lit: row.lit.unwrap_or(false),
-                            patrolled: row.patrolled.unwrap_or(false),
+                            snowmaking: row.snowmaking.map(|v| v != 0).unwrap_or(false),
+                            lit: row.lit.map(|v| v != 0).unwrap_or(false),
+                            patrolled: row.patrolled.map(|v| v != 0).unwrap_or(false),
                             difficulty_convention: row.difficulty_convention,
-                            grooming: row.grooming,
+                            grooming: grooming_value.clone(),
                         },
                         source: parse_source_info(row.sources_json),
                         description: row.description,
                         status: SlopeStatus {
                             status: row.status,
-                            grooming_status: row.grooming,
+                            grooming_status: grooming_value,
                             note: None,
                             updated_at: None,
                         },

@@ -271,7 +271,7 @@ pub async fn get_lifts(db: web::Data<MySqlPool>) -> impl Responder {
     let result = sqlx::query!(
         r#"
         SELECT id, name, lift_type, `type` AS feature_type,
-               capacity, duration, detachable, heating, bubble,
+               capacity, CAST(duration AS DOUBLE) AS duration, detachable, heating, bubble,
                description, status,
                CAST(geometry AS CHAR) AS geometry_json,
                CAST(sources AS CHAR) AS sources_json,
@@ -320,9 +320,9 @@ pub async fn get_lifts(db: web::Data<MySqlPool>) -> impl Responder {
                         specs: LiftSpecs {
                             capacity: row.capacity,
                             duration_minutes: row.duration,
-                            detachable: row.detachable.unwrap_or(false),
+                            detachable: row.detachable.map(|v| v != 0).unwrap_or(false),
                             heating: parse_heating(row.heating),
-                            bubble: row.bubble.unwrap_or(false),
+                            bubble: row.bubble.map(|v| v != 0).unwrap_or(false),
                         },
                         source: parse_source_info(row.sources_json),
                         description: row.description,
@@ -346,7 +346,7 @@ pub async fn get_lift(db: web::Data<MySqlPool>, id: web::Path<String>) -> impl R
     let result = sqlx::query!(
         r#"
         SELECT id, name, lift_type, `type` AS feature_type,
-               capacity, duration, detachable, heating, bubble,
+               capacity, CAST(duration AS DOUBLE) AS duration, detachable, heating, bubble,
                description, status,
                CAST(geometry AS CHAR) AS geometry_json,
                CAST(sources AS CHAR) AS sources_json,
@@ -394,9 +394,9 @@ pub async fn get_lift(db: web::Data<MySqlPool>, id: web::Path<String>) -> impl R
                 specs: LiftSpecs {
                     capacity: row.capacity,
                     duration_minutes: row.duration,
-                    detachable: row.detachable.unwrap_or(false),
+                    detachable: row.detachable.map(|v| v != 0).unwrap_or(false),
                     heating: parse_heating(row.heating),
-                    bubble: row.bubble.unwrap_or(false),
+                    bubble: row.bubble.map(|v| v != 0).unwrap_or(false),
                 },
                 source: parse_source_info(row.sources_json),
                 description: row.description,
@@ -422,7 +422,7 @@ pub async fn get_lifts_by_resort(
     let result = sqlx::query!(
         r#"
         SELECT id, name, lift_type, `type` AS feature_type,
-               capacity, duration, detachable, heating, bubble,
+               capacity, CAST(duration AS DOUBLE) AS duration, detachable, heating, bubble,
                description, status,
                CAST(geometry AS CHAR) AS geometry_json,
                CAST(sources AS CHAR) AS sources_json,
@@ -473,9 +473,9 @@ pub async fn get_lifts_by_resort(
                         specs: LiftSpecs {
                             capacity: row.capacity,
                             duration_minutes: row.duration,
-                            detachable: row.detachable.unwrap_or(false),
+                            detachable: row.detachable.map(|v| v != 0).unwrap_or(false),
                             heating: parse_heating(row.heating),
-                            bubble: row.bubble.unwrap_or(false),
+                            bubble: row.bubble.map(|v| v != 0).unwrap_or(false),
                         },
                         source: parse_source_info(row.sources_json),
                         description: row.description,
