@@ -4,11 +4,12 @@ This directory contains the unified data collection system for fetching ski slop
 
 ## Overview
 
-The data collection system consists of three main components:
+The data collection system consists of several components:
 
 1. **config.py** - Shared configuration for all tools
 2. **collect_and_sync.py** - Single worker that processes a longitude range
 3. **parallel_launcher.py** - Launches multiple parallel workers
+4. **push_geojson_api.py** - Pushes pre-existing GeoJSON files to the API
 
 Additionally, the `server/wipe_table/` directory contains a Rust tool for backing up and clearing tables.
 
@@ -118,6 +119,49 @@ Each worker saves progress to `progress_<instance_id>.json`:
 ```
 
 On restart, workers resume from `last_processed_osm_id`.
+
+### push_geojson_api.py
+
+Pushes pre-existing GeoJSON files to the OpenSlope API. This tool is useful for bulk importing data that has already been collected and formatted.
+
+```bash
+# Usage
+python push_geojson_api.py --file FILE [--all] [--validate] [--dry-run] [--limit N]
+
+# Options
+--file FILE      Single GeoJSON file to push (lifts.geojson, runs.geojson, ski_areas.geojson)
+--all            Push all supported GeoJSON files from data/geodata/
+--validate       Validate API connectivity before pushing data
+--dry-run        Build payloads and validate API connectivity without sending requests
+--limit N        Limit the number of features pushed from each file
+```
+
+**Supported file types:**
+- `lifts.geojson` → `/import/geojson/lifts`
+- `runs.geojson` → `/import/geojson/slopes` 
+- `ski_areas.geojson` → `/import/geojson/resorts`
+
+**Features:**
+- Streaming parser for large files (no memory issues)
+- Automatic retry on HTTP 408/timeout with exponential backoff
+- Payload builders that extract relevant fields from GeoJSON properties
+- Progress tracking and error reporting
+- Dry-run mode for testing
+
+**Example usage:**
+```bash
+# Validate API connectivity
+python push_geojson_api.py --validate
+
+# Dry run to preview data processing
+python push_geojson_api.py --file data/geodata/ski_areas.geojson --limit 10 --dry-run
+
+# Push all GeoJSON files
+python push_geojson_api.py --all
+
+# Push with feature limit
+python push_geojson_api.py --file data/geodata/runs.geojson --limit 1000
+```
 
 ## Data Collection Details
 

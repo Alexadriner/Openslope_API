@@ -78,6 +78,7 @@ use routes::resorts::*;
 use routes::slopes::*;
 use routes::lifts::*;
 use routes::status::*;
+use routes::geojson_import::*;
 
 use routes::auth::{signup, signin, me};
 
@@ -170,6 +171,9 @@ async fn main() -> std::io::Result<()> {
                     .route("/lifts/{id}", web::delete().to(delete_lift))
                     .route("/lifts/by_resort/{resort_id}", web::get().to(get_lifts_by_resort))
                     .route("/lifts/by_resort/{resort_id}", web::delete().to(delete_lifts_by_resort))
+
+                    // GeoJSON import endpoints
+                    .route("/import/geojson/{resource}", web::post().to(import_geojson))
 
                     // Status and scraping endpoints
                     .route("/scrape-runs", web::get().to(get_scrape_runs))

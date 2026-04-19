@@ -456,10 +456,10 @@ fn parse_first_ski_area(raw: Option<String>) -> Option<String> {
 async fn load_lifts_by_resort(db: &MySqlPool) -> Result<HashMap<String, Vec<LiftSummary>>, Error> {
     let rows = sqlx::query!(
         r#"
-        SELECT id, name, lift_type, `type` AS feature_type, status,
+        SELECT id, ref, name, lift_type, `type` AS feature_type, status,
                CAST(geometry AS CHAR) AS geometry_json,
                CAST(ski_areas AS CHAR) AS ski_areas_json
-        FROM geojson_lifts
+        FROM lifts
         "#
     )
     .fetch_all(db)
@@ -511,10 +511,10 @@ async fn load_slopes_by_resort(
 ) -> Result<HashMap<String, Vec<SlopeSummary>>, Error> {
     let rows = sqlx::query!(
         r#"
-        SELECT id, name, difficulty, status, grooming, snowmaking, lit, patrolled,
+        SELECT id, ref, name, difficulty, status, grooming, snowmaking, lit, patrolled,
                difficulty_convention, CAST(geometry AS CHAR) AS geometry_json,
                CAST(ski_areas AS CHAR) AS ski_areas_json
-        FROM geojson_runs
+        FROM slopes
         "#
     )
     .fetch_all(db)
@@ -754,9 +754,9 @@ pub async fn get_resort(db: web::Data<MySqlPool>, id: web::Path<String>) -> impl
 
     let lifts_result = sqlx::query!(
         r#"
-        SELECT id, name, lift_type, `type` AS feature_type, status,
+        SELECT id, ref, name, lift_type, `type` AS feature_type, status,
                CAST(geometry AS CHAR) AS geometry_json
-        FROM geojson_lifts
+        FROM lifts
         WHERE JSON_CONTAINS(ski_areas, JSON_QUOTE(?))
         ORDER BY name
         "#,
@@ -808,9 +808,9 @@ pub async fn get_resort(db: web::Data<MySqlPool>, id: web::Path<String>) -> impl
 
     let slopes_result = sqlx::query!(
         r#"
-        SELECT id, name, difficulty, status, grooming,
+        SELECT id, ref, name, difficulty, status, grooming,
                CAST(geometry AS CHAR) AS geometry_json
-        FROM geojson_runs
+        FROM slopes
         WHERE JSON_CONTAINS(ski_areas, JSON_QUOTE(?))
         ORDER BY name
         "#,

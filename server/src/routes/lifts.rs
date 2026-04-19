@@ -270,13 +270,13 @@ fn parse_heating(value: Option<String>) -> bool {
 pub async fn get_lifts(db: web::Data<MySqlPool>) -> impl Responder {
     let result = sqlx::query!(
         r#"
-        SELECT id, name, lift_type, `type` AS feature_type,
+        SELECT id, ref, name, lift_type, `type` AS feature_type,
                capacity, CAST(duration AS DOUBLE) AS duration, detachable, heating, bubble,
                description, status,
                CAST(geometry AS CHAR) AS geometry_json,
                CAST(sources AS CHAR) AS sources_json,
                CAST(ski_areas AS CHAR) AS ski_areas_json
-        FROM geojson_lifts
+        FROM lifts
         ORDER BY name
         "#
     )
@@ -345,13 +345,13 @@ pub async fn get_lifts(db: web::Data<MySqlPool>) -> impl Responder {
 pub async fn get_lift(db: web::Data<MySqlPool>, id: web::Path<String>) -> impl Responder {
     let result = sqlx::query!(
         r#"
-        SELECT id, name, lift_type, `type` AS feature_type,
+        SELECT id, ref, name, lift_type, `type` AS feature_type,
                capacity, CAST(duration AS DOUBLE) AS duration, detachable, heating, bubble,
                description, status,
                CAST(geometry AS CHAR) AS geometry_json,
                CAST(sources AS CHAR) AS sources_json,
                CAST(ski_areas AS CHAR) AS ski_areas_json
-        FROM geojson_lifts
+        FROM lifts
         WHERE id = ?
         "#,
         id.into_inner()
@@ -421,13 +421,13 @@ pub async fn get_lifts_by_resort(
 ) -> impl Responder {
     let result = sqlx::query!(
         r#"
-        SELECT id, name, lift_type, `type` AS feature_type,
+        SELECT id, ref, name, lift_type, `type` AS feature_type,
                capacity, CAST(duration AS DOUBLE) AS duration, detachable, heating, bubble,
                description, status,
                CAST(geometry AS CHAR) AS geometry_json,
                CAST(sources AS CHAR) AS sources_json,
                CAST(ski_areas AS CHAR) AS ski_areas_json
-        FROM geojson_lifts
+        FROM lifts
         WHERE JSON_CONTAINS(ski_areas, JSON_QUOTE(?))
         ORDER BY name
         "#,

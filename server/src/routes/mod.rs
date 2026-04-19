@@ -88,3 +88,4 @@ pub mod lifts;
 pub mod slopes;
 pub mod status;
 pub mod auth;
+pub mod geojson_import;
