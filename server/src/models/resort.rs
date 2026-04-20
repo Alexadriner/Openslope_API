@@ -96,10 +96,10 @@
 //! Author: OpenSlope Team
 //! Version: 1.0.0
 
-use serde::Serialize;
-use serde_json::Value;
 use super::lift::LiftResponse;
 use super::slope::SlopeResponse;
+use serde::Serialize;
+use serde_json::Value;
 
 /// Complete ski resort information for API responses
 ///
@@ -308,5 +308,3 @@ pub struct SkiAreaBlock {
     /// Additional GeoJSON properties for the ski area
     pub properties: Option<Value>,
 }
-
-

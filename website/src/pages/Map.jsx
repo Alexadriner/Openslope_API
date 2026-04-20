@@ -1,35 +1,19 @@
-/**
- * Interactive Ski Map Component
- * 
- * This component renders an interactive map using Leaflet.js to display ski resorts,
- * slopes, and lifts worldwide. It provides a comprehensive visualization of ski area
- * infrastructure with clustering for better performance and user experience.
- * 
- * Features:
- * - Interactive map with OpenStreetMap tiles
- * - Resort clustering for better performance
- * - Slope and lift visualization with color coding
- * - Responsive design with zoom-based layer visibility
- * - Popup information for resorts
- * 
- * @author OpenSlope Team
- * @version 1.0.0
- */
-
 import { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import "leaflet.markercluster";
 import "leaflet.markercluster/dist/MarkerCluster.css";
 import "leaflet.markercluster/dist/MarkerCluster.Default.css";
-import { fetchResortsForMap, fetchSlopesForMap, fetchLiftsForMap } from "../api/client";
+import { fetchResortsForMap } from "../api/client";
+import { formatStatusLabel, getLocationLabel, getResortStats } from "../utils/resortData";
 import "../stylesheets/base.css";
 import "../stylesheets/map.css";
 
-/**
- * Custom marker icon for individual resorts
- * Uses a div icon with CSS styling for better customization
- */
+const DEFAULT_CENTER = [46.8, 8.2];
+const DEFAULT_ZOOM = 5;
+const LIFTS_MIN_ZOOM = 10;
+const SLOPES_MIN_ZOOM = 11;
+
 const RESORT_MARKER_ICON = L.divIcon({
   className: "single-resort-marker-icon",
   html: '<div class="single-resort-marker-dot" aria-hidden="true"></div>',
@@ -38,315 +22,110 @@ const RESORT_MARKER_ICON = L.divIcon({
   popupAnchor: [0, -15],
 });
 
-/**
- * Default map center and zoom level
- * Centered on the Alps region for optimal ski resort visibility
- */
-const DEFAULT_CENTER = [46.8, 8.2];
-const DEFAULT_ZOOM = 5;
-
-/**
- * Zoom levels for different layer types
- * Lifts and slopes are only shown at higher zoom levels for performance
- */
-const LIFTS_MIN_ZOOM = 9;
-const SLOPES_MIN_ZOOM = 10;
-
-/**
- * Clustering radius in pixels
- * Resorts within this distance will be clustered together
- */
-const CLUSTER_PIXEL_RADIUS = 55;
-
-/**
- * Convert a value to a number or null
- * @param {*} value - Value to convert
- * @returns {number|null} - Parsed number or null
- */
-function toNumberOrNull(value) {
-  if (value == null) return null;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-/**
- * Extract resort coordinates from various data formats
- * Handles both new geography structure and legacy latitude/longitude fields
- * 
- * @param {Object} resort - Resort data object
- * @returns {Array|null} - [latitude, longitude] array or null
- */
-function getResortCoordinates(resort) {
-  const latitude = toNumberOrNull(resort.geography?.coordinates?.latitude ?? resort.latitude);
-  const longitude = toNumberOrNull(resort.geography?.coordinates?.longitude ?? resort.longitude);
-
-  if (latitude == null || longitude == null) return null;
-
-  return [latitude, longitude];
-}
-
-/**
- * Get color for slope based on difficulty level
- * 
- * @param {string} difficulty - Slope difficulty (green, blue, red, black)
- * @returns {string} - CSS color value
- */
 function getSlopeColor(difficulty) {
   const key = String(difficulty ?? "").toLowerCase().trim();
-
-  if (key === "green") return "#27ae60";
-  if (key === "blue") return "#2980b9";
-  if (key === "red") return "#c0392b";
-  if (key === "black") return "#2c3e50";
-
-  return "#7f8c8d";
+  if (key === "green") return "#30a46c";
+  if (key === "blue") return "#2075c7";
+  if (key === "red") return "#c43d36";
+  if (key === "black") return "#1f2933";
+  return "#75879a";
 }
 
-/**
- * Create a line layer between two points
- * Used for drawing lifts and slopes as simple lines
- * 
- * @param {number} startLat - Starting latitude
- * @param {number} startLon - Starting longitude
- * @param {number} endLat - Ending latitude
- * @param {number} endLon - Ending longitude
- * @param {Object} style - Leaflet line style options
- * @returns {Object|null} - Layer and bounds object or null
- */
-function createLineEntry(startLat, startLon, endLat, endLon, style) {
-  const aLat = toNumberOrNull(startLat);
-  const aLon = toNumberOrNull(startLon);
-  const bLat = toNumberOrNull(endLat);
-  const bLon = toNumberOrNull(endLon);
-
-  if (aLat == null || aLon == null || bLat == null || bLon == null) {
+function createFeatureLayer(geometry, style, popupText) {
+  if (!geometry) {
     return null;
   }
 
-  const layer = L.polyline(
-    [
-      [aLat, aLon],
-      [bLat, bLon],
-    ],
-    style
-  );
-
-  return {
-    layer,
-    bounds: L.latLngBounds(
-      [aLat, aLon],
-      [bLat, bLon]
-    ),
-  };
-}
-
-/**
- * Create a GeoJSON layer from GeoJSON data
- * Used for slopes with complex geometry and direction information
- * 
- * @param {Object} geoJsonData - GeoJSON feature collection
- * @param {Object} style - Leaflet style options
- * @returns {Object|null} - Layer and bounds object or null
- */
-function createGeoJsonEntry(geoJsonData, style) {
-  if (!geoJsonData || !geoJsonData.features || geoJsonData.features.length === 0) {
-    return null;
-  }
-
-  const layer = L.geoJSON(geoJsonData, {
-    style: style,
-    onEachFeature: function (feature, layer) {
-      if (feature.properties && feature.properties.direction) {
-        const direction = feature.properties.direction;
-        const latlngs = layer.getLatLngs();
-        if (latlngs && latlngs.length > 0) {
-          const midPoint = latlngs[Math.floor(latlngs.length / 2)];
-          L.marker(midPoint, {
-            icon: L.divIcon({
-              className: 'slope-direction-icon',
-              html: `<div class="slope-direction-arrow" style="transform: rotate(${direction}deg)"></div>`,
-              iconSize: [20, 20],
-              iconAnchor: [10, 10]
-            })
-          }).addTo(layer);
-          layer.bindPopup(`Direction: ${direction}°`);
-        }
-      }
-    }
-  });
-
+  const layer = L.geoJSON(geometry, { style });
   const bounds = layer.getBounds();
-  return {
-    layer,
-    bounds: bounds.isValid() ? bounds : null
-  };
+  if (!bounds.isValid()) {
+    return null;
+  }
+
+  if (popupText) {
+    layer.bindPopup(popupText);
+  }
+
+  return { layer, bounds };
 }
 
-/**
- * Create HTML content for resort popup
- * 
- * @param {Object} resort - Resort data object
- * @returns {string} - HTML string for popup
- */
 function createResortPopupHtml(resort) {
-  const resortName = resort.name ?? "Unknown resort";
-  const detailHref = `/resort/${encodeURIComponent(resortName)}`;
-
-  return (
-    `<strong>${resortName}</strong><br/>` +
-    `${resort.geography?.country ?? resort.country ?? "N/A"}<br/>` +
-    `click <a href="${detailHref}">here</a> for more information`
-  );
+  const stats = getResortStats(resort);
+  return `
+    <strong>${resort.name}</strong><br/>
+    ${getLocationLabel(resort)}<br/>
+    ${getOpenMetricLine("Lifts", stats.openLiftCount, stats.totalLiftCount, stats.liftCount)}<br/>
+    ${getOpenMetricLine("Slopes", stats.openSlopeCount, stats.totalSlopeCount, stats.slopeCount)}<br/>
+    <a href="/resorts/${resort.id}">Open resort page</a>
+  `;
 }
 
-/**
- * Create a marker for a resort with popup
- * 
- * @param {Object} resort - Prepared resort object
- * @returns {L.Marker} - Leaflet marker instance
- */
-function createResortMarker(resort) {
-  return L.marker(resort.resortLatLng, { icon: RESORT_MARKER_ICON }).bindPopup(resort.popupHtml);
-}
-
-/**
- * Split visible resorts into clustered and single groups
- * Resorts that are close together will be clustered, others shown individually
- * 
- * @param {Array} visibleResorts - Array of visible resort objects
- * @param {L.Map} map - Leaflet map instance
- * @returns {Object} - Object with singles and grouped arrays
- */
-function splitVisibleResortsByProximity(visibleResorts, map) {
-  const groupedIndexes = new Set();
-  const zoom = map.getZoom();
-  const projected = visibleResorts.map((resort) => map.project(resort.resortLatLng, zoom));
-
-  for (let i = 0; i < projected.length; i += 1) {
-    for (let j = i + 1; j < projected.length; j += 1) {
-      if (projected[i].distanceTo(projected[j]) <= CLUSTER_PIXEL_RADIUS) {
-        groupedIndexes.add(i);
-        groupedIndexes.add(j);
-      }
-    }
+function getOpenMetricLine(label, openCount, totalCount, fallbackTotal) {
+  const total = totalCount ?? fallbackTotal;
+  if (openCount == null && total == null) {
+    return `${label}: no live data`;
   }
-
-  const singles = [];
-  const grouped = [];
-
-  for (let i = 0; i < visibleResorts.length; i += 1) {
-    if (groupedIndexes.has(i)) {
-      grouped.push(visibleResorts[i]);
-    } else {
-      singles.push(visibleResorts[i]);
-    }
+  if (openCount == null) {
+    return `${label}: ${total} total`;
   }
-
-  return { singles, grouped };
+  return `${label}: ${openCount}/${total ?? "?"} open`;
 }
 
-/**
- * Prepare resort data for map rendering
- * Extracts coordinates, creates popup HTML, and processes lifts and slopes
- * 
- * @param {Object} resort - Raw resort data
- * @returns {Object} - Prepared resort object with layers and metadata
- */
 function prepareResort(resort) {
-  const coordinates = getResortCoordinates(resort);
-  const resortLatLng = coordinates ? L.latLng(coordinates[0], coordinates[1]) : null;
-  const popupHtml = createResortPopupHtml(resort);
-
-  const lifts = (resort.lifts ?? [])
-    .map((lift) =>
-      createLineEntry(
-        lift.geometry?.start?.latitude ?? lift.lat_start,
-        lift.geometry?.start?.longitude ?? lift.lon_start,
-        lift.geometry?.end?.latitude ?? lift.lat_end,
-        lift.geometry?.end?.longitude ?? lift.lon_end,
-        {
-          color: "#8e8e8e",
-          weight: 2,
-          opacity: 0.8,
-        }
-      )
-    )
-    .filter(Boolean);
-
-  const slopes = (resort.slopes ?? [])
-    .map((slope) => {
-      // Check if GeoJSON data is available
-      if (slope.geometry?.path && slope.geometry.path.length > 0) {
-        // Create GeoJSON data structure
-        const geoJsonData = {
-          type: "FeatureCollection",
-          features: [{
-            type: "Feature",
-            properties: {
-              direction: slope.geometry.direction
-            },
-            geometry: {
-              type: "LineString",
-              coordinates: slope.geometry.path.map(point => [point.longitude, point.latitude])
-            }
-          }]
-        };
-
-        return createGeoJsonEntry(geoJsonData, {
-          color: getSlopeColor(slope.difficulty ?? slope.display?.difficulty),
-          weight: 2.2,
-          opacity: 0.95,
-        });
-      } else {
-        // Fallback to line entry if no GeoJSON data
-        return createLineEntry(
-          slope.geometry?.start?.latitude ?? slope.lat_start,
-          slope.geometry?.start?.longitude ?? slope.lon_start,
-          slope.geometry?.end?.latitude ?? slope.lat_end,
-          slope.geometry?.end?.longitude ?? slope.lon_end,
-          {
-            color: getSlopeColor(slope.difficulty ?? slope.display?.difficulty),
-            weight: 2.2,
-            opacity: 0.95,
-          }
-        );
-      }
-    })
-    .filter(Boolean);
+  const coordinates = resort.coordinates;
+  if (!coordinates) {
+    return null;
+  }
 
   return {
-    resortLatLng,
-    popupHtml,
-    lifts,
-    slopes,
+    marker: L.marker([coordinates.latitude, coordinates.longitude], {
+      icon: RESORT_MARKER_ICON,
+    }).bindPopup(createResortPopupHtml(resort)),
+    point: L.latLng(coordinates.latitude, coordinates.longitude),
+    lifts: (resort.lifts ?? [])
+      .map((lift) =>
+        createFeatureLayer(
+          lift.geometry,
+          {
+            color: "#6b7280",
+            weight: 2,
+            opacity: 0.85,
+          },
+          `${lift.name ?? "Unnamed lift"}<br/>${formatStatusLabel(lift.status)}`
+        )
+      )
+      .filter(Boolean),
+    slopes: (resort.slopes ?? [])
+      .map((slope) =>
+        createFeatureLayer(
+          slope.geometry,
+          {
+            color: getSlopeColor(slope.difficulty),
+            weight: 2.5,
+            opacity: 0.95,
+          },
+          `${slope.name ?? "Unnamed slope"}<br/>${formatStatusLabel(slope.difficulty)} · ${formatStatusLabel(slope.status)}`
+        )
+      )
+      .filter(Boolean),
   };
 }
 
-/**
- * Main Map component
- * 
- * Renders an interactive ski map with resorts, slopes, and lifts.
- * Uses Leaflet.js for map rendering and clustering for performance optimization.
- * 
- * @returns {JSX.Element} - React component
- */
 export default function Map() {
-  // Refs for map elements and data
   const containerRef = useRef(null);
   const mapRef = useRef(null);
-  const clusterMarkersRef = useRef(null);
-  const singleMarkersRef = useRef(null);
+  const clusterRef = useRef(null);
   const liftsLayerRef = useRef(null);
   const slopesLayerRef = useRef(null);
   const preparedResortsRef = useRef([]);
 
-  // State for loading and error handling
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  // Initialize map on component mount
   useEffect(() => {
-    if (mapRef.current || !containerRef.current) return;
+    if (mapRef.current || !containerRef.current) {
+      return undefined;
+    }
 
     const map = L.map(containerRef.current, {
       center: DEFAULT_CENTER,
@@ -355,175 +134,139 @@ export default function Map() {
       worldCopyJump: true,
     });
 
-    // Add OpenStreetMap tile layer
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
       maxZoom: 19,
     }).addTo(map);
 
-    // Initialize layer groups
-    const clusterMarkers = L.markerClusterGroup({
+    clusterRef.current = L.markerClusterGroup({
       showCoverageOnHover: false,
       spiderfyOnMaxZoom: true,
-      maxClusterRadius: CLUSTER_PIXEL_RADIUS,
-    });
+      maxClusterRadius: 55,
+    }).addTo(map);
 
-    const singleMarkers = L.layerGroup();
-    const liftsLayer = L.layerGroup();
-    const slopesLayer = L.layerGroup();
-
-    clusterMarkers.addTo(map);
-    singleMarkers.addTo(map);
-    liftsLayer.addTo(map);
-    slopesLayer.addTo(map);
-
-    // Store references
+    liftsLayerRef.current = L.layerGroup().addTo(map);
+    slopesLayerRef.current = L.layerGroup().addTo(map);
     mapRef.current = map;
-    clusterMarkersRef.current = clusterMarkers;
-    singleMarkersRef.current = singleMarkers;
-    liftsLayerRef.current = liftsLayer;
-    slopesLayerRef.current = slopesLayer;
 
-    // Cleanup on unmount
     return () => {
-      map.off("moveend");
-      map.off("zoomend");
       map.remove();
       mapRef.current = null;
-      clusterMarkersRef.current = null;
-      singleMarkersRef.current = null;
+      clusterRef.current = null;
       liftsLayerRef.current = null;
       slopesLayerRef.current = null;
       preparedResortsRef.current = [];
     };
   }, []);
 
-  // Load map data on component mount
   useEffect(() => {
+    let cancelled = false;
+
     async function loadMapData() {
-      if (
-        !mapRef.current ||
-        !clusterMarkersRef.current ||
-        !singleMarkersRef.current ||
-        !liftsLayerRef.current ||
-        !slopesLayerRef.current
-      ) {
+      if (!mapRef.current || !clusterRef.current || !liftsLayerRef.current || !slopesLayerRef.current) {
         return;
       }
 
-      setLoading(true);
-      setError("");
-
       try {
-        // Load resorts optimized for map rendering
-        const resorts = await fetchResortsForMap();
-        preparedResortsRef.current = resorts.map(prepareResort);
+        setLoading(true);
+        setError("");
 
-        // Calculate bounds and fit map to show all resorts
-        const bounds = L.latLngBounds([]);
-        for (const resort of preparedResortsRef.current) {
-          if (resort.resortLatLng) bounds.extend(resort.resortLatLng);
+        const resorts = await fetchResortsForMap();
+        if (cancelled) {
+          return;
         }
 
+        preparedResortsRef.current = resorts.map(prepareResort).filter(Boolean);
+
+        clusterRef.current.clearLayers();
+        preparedResortsRef.current.forEach((resort) => {
+          clusterRef.current.addLayer(resort.marker);
+        });
+
+        const bounds = L.latLngBounds(preparedResortsRef.current.map((resort) => resort.point));
         if (bounds.isValid()) {
-          mapRef.current.fitBounds(bounds.pad(0.15));
+          mapRef.current.fitBounds(bounds.pad(0.18));
         }
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Map data could not be loaded.");
+        if (!cancelled) {
+          setError(err.message || "Map data could not be loaded.");
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     }
 
     loadMapData();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  // Handle map interactions and layer visibility
   useEffect(() => {
     const map = mapRef.current;
-    const clusterMarkers = clusterMarkersRef.current;
-    const singleMarkers = singleMarkersRef.current;
     const liftsLayer = liftsLayerRef.current;
     const slopesLayer = slopesLayerRef.current;
-    if (!map || !clusterMarkers || !singleMarkers || !liftsLayer || !slopesLayer) return;
 
-    /**
-     * Refresh visible layers based on current map view
-     * Shows/hides layers based on zoom level and viewport
-     */
+    if (!map || !liftsLayer || !slopesLayer) {
+      return undefined;
+    }
+
     const refreshVisibleLayers = () => {
-      const visibleBounds = map.getBounds().pad(0.1);
+      const visibleBounds = map.getBounds().pad(0.12);
       const zoom = map.getZoom();
       const showLifts = zoom >= LIFTS_MIN_ZOOM;
       const showSlopes = zoom >= SLOPES_MIN_ZOOM;
 
-      // Clear all layers
-      clusterMarkers.clearLayers();
-      singleMarkers.clearLayers();
       liftsLayer.clearLayers();
       slopesLayer.clearLayers();
 
-      // Get visible resorts and split into clusters and singles
-      const visibleResorts = preparedResortsRef.current.filter(
-        (resort) => resort.resortLatLng && visibleBounds.contains(resort.resortLatLng)
-      );
-      const { singles, grouped } = splitVisibleResortsByProximity(visibleResorts, map);
-
-      // Add resort markers
-      for (const resort of grouped) {
-        clusterMarkers.addLayer(createResortMarker(resort));
-      }
-
-      for (const resort of singles) {
-        singleMarkers.addLayer(createResortMarker(resort));
-      }
-
-      // Add lifts and slopes based on zoom level
-      for (const resort of preparedResortsRef.current) {
+      preparedResortsRef.current.forEach((resort) => {
         if (showLifts) {
-          for (const lift of resort.lifts) {
+          resort.lifts.forEach((lift) => {
             if (visibleBounds.intersects(lift.bounds)) {
               liftsLayer.addLayer(lift.layer);
             }
-          }
+          });
         }
 
         if (showSlopes) {
-          for (const slope of resort.slopes) {
+          resort.slopes.forEach((slope) => {
             if (visibleBounds.intersects(slope.bounds)) {
               slopesLayer.addLayer(slope.layer);
             }
-          }
+          });
         }
-      }
+      });
     };
 
-    // Initial refresh and event listeners
     refreshVisibleLayers();
     map.on("moveend", refreshVisibleLayers);
     map.on("zoomend", refreshVisibleLayers);
 
-    // Cleanup event listeners
     return () => {
       map.off("moveend", refreshVisibleLayers);
       map.off("zoomend", refreshVisibleLayers);
     };
   }, [loading]);
 
-  // Render the map component
   return (
     <div className="page-container map-page">
       <h1>Ski Map</h1>
       <p className="map-subtitle">
-        Interactive skimap to find resorts around the world!
+        Browse resort locations first, then zoom in for lift lines and slope geometry from the new API.
       </p>
 
       <div className="map-frame">
         <div ref={containerRef} className="ski-map-canvas" />
       </div>
 
-      {loading && <p className="map-status">Lade Kartendaten...</p>}
-      {error && <p className="map-status map-error">Fehler: {error}</p>}
+      <p className="map-status">
+        {loading ? "Loading resort map..." : "Zoom in to reveal lifts and slopes."}
+      </p>
+      {error ? <p className="map-status map-error">{error}</p> : null}
     </div>
   );
 }

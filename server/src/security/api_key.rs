@@ -73,9 +73,9 @@
 //! Author: OpenSlope Team
 //! Version: 1.0.0
 
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use rand::RngCore;
 use rand::rngs::OsRng;
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 
 /// Generate a cryptographically secure API key
 ///

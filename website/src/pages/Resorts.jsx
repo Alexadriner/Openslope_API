@@ -1,96 +1,129 @@
-﻿/**
- * Resorts List Component
- * 
- * This component displays a list of all ski resorts available in the OpenSlope system.
- * It provides a simple interface for users to browse and navigate to individual resort pages.
- * 
- * Features:
- * - Loads resort data from the API with caching support
- * - Displays resort names and countries
- * - Provides navigation links to individual resort detail pages
- * - Includes loading states and error handling
- * - Shows data source information
- * 
- * @author OpenSlope Team
- * @version 1.0.0
- */
-
-import { useEffect, useState } from "react";
-import { fetchResorts } from "../api/client";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { fetchResorts } from "../api/client";
+import {
+  formatStatusLabel,
+  getActivities,
+  getLocationLabel,
+  getOpenMetric,
+  getResortStats,
+} from "../utils/resortData";
 import "../stylesheets/base.css";
+import "../stylesheets/resorts.css";
 
-/**
- * Resorts component that renders a list of all available ski resorts
- * 
- * @returns {JSX.Element} - React component rendering the resorts list
- */
 export default function Resorts() {
-  // State management for resorts data, loading state, and errors
   const [resorts, setResorts] = useState([]);
+  const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState("");
 
-  /**
-   * Load resorts data from the API
-   * Uses the 'names_only' transformation to optimize performance by fetching only
-   * the necessary data for the list view (resort names and IDs)
-   */
   useEffect(() => {
-    const loadResorts = async () => {
+    let cancelled = false;
+
+    async function loadResorts() {
       try {
         setLoading(true);
-        // Use names_only transformation since we only need names and IDs for the list
-        const data = await fetchResorts("names_only");
-        setResorts(data);
+        setError("");
+        const data = await fetchResorts();
+        if (!cancelled) {
+          setResorts(Array.isArray(data) ? data : []);
+        }
       } catch (err) {
-        setError(err.message || "Failed to load resorts");
+        if (!cancelled) {
+          setError(err.message || "Failed to load resorts");
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
-    };
+    }
 
     loadResorts();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  // Loading state - displays while data is being fetched
+  const visibleResorts = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    const filtered = normalizedQuery
+      ? resorts.filter((resort) => {
+          const haystack = `${resort.name} ${getLocationLabel(resort)} ${getActivities(resort).join(" ")}`.toLowerCase();
+          return haystack.includes(normalizedQuery);
+        })
+      : resorts;
+
+    return [...filtered].sort((left, right) => {
+      const leftStats = getResortStats(left);
+      const rightStats = getResortStats(right);
+      return (rightStats.openSlopeCount ?? -1) - (leftStats.openSlopeCount ?? -1);
+    });
+  }, [query, resorts]);
+
   if (loading) {
-    return (
-      <div className="page-container">
-        <h1>Resorts</h1>
-        <p>Loading resorts...</p>
-      </div>
-    );
+    return <div className="resorts-page"><p>Loading resorts...</p></div>;
   }
 
-  // Error state - displays when data loading fails
   if (error) {
-    return (
-      <div className="page-container">
-        <h1>Resorts</h1>
-        <p className="error-message">Error: {error}</p>
-        <button onClick={() => window.location.reload()}>Retry</button>
-      </div>
-    );
+    return <div className="resorts-page"><p className="error-message">{error}</p></div>;
   }
 
-  // Success state - displays the list of resorts
   return (
-    <div className="page-container">
-      <h1>Resorts</h1>
-      {/* Display the number of resorts and note about cached data */}
-      <p className="data-source-note">Showing {resorts.length} resorts (cached data available)</p>
-      
-      {/* Render the list of resorts */}
-      <ul>
-        {resorts.map((resort) => (
-          <li key={resort.id}>
-            <Link to={`/resorts/${resort.id}`}>
-              {resort.name} - {resort.country ?? "N/A"}
+    <div className="resorts-page">
+      <section className="resorts-header">
+        <div>
+          <p className="eyebrow">Resort discovery</p>
+          <h1>Ski resorts ready for a consumer-friendly overview</h1>
+          <p>{visibleResorts.length} resorts match your search.</p>
+        </div>
+
+        <label className="resorts-filter">
+          <span className="sr-only">Filter resorts</span>
+          <input
+            type="search"
+            placeholder="Filter by resort, place or activity"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        </label>
+      </section>
+
+      <section className="resorts-grid">
+        {visibleResorts.map((resort) => {
+          const stats = getResortStats(resort);
+          const activities = getActivities(resort).slice(0, 3);
+
+          return (
+            <Link key={resort.id} to={`/resorts/${resort.id}`} className="resort-card-link">
+              <article className="resort-card">
+                <p className="resort-card-location">{getLocationLabel(resort)}</p>
+                <h2>{resort.name}</h2>
+                <p>{activities.length ? activities.join(" · ") : "Ski information available in database"}</p>
+
+                <div className="resort-card-metrics">
+                  <div>
+                    <span>Lifts</span>
+                    <strong>{getOpenMetric(stats.openLiftCount, stats.totalLiftCount, stats.liftCount)}</strong>
+                  </div>
+                  <div>
+                    <span>Slopes</span>
+                    <strong>{getOpenMetric(stats.openSlopeCount, stats.totalSlopeCount, stats.slopeCount)}</strong>
+                  </div>
+                </div>
+
+                <div className="resort-card-status">
+                  <span className={`status-badge ${String(resort.status ?? "unknown").toLowerCase()}`}>
+                    {formatStatusLabel(resort.status)}
+                  </span>
+                  <span>{resort.latest_snapshot?.new_snow_24h_cm != null ? `+${resort.latest_snapshot.new_snow_24h_cm} cm new snow` : "No new snow data"}</span>
+                </div>
+              </article>
             </Link>
-          </li>
-        ))}
-      </ul>
+          );
+        })}
+      </section>
     </div>
   );
 }

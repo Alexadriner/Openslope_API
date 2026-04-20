@@ -1,7 +1,10 @@
-use actix_web::{web, HttpResponse};
+use actix_web::{HttpResponse, web};
 use serde_json::Value;
 
-use crate::{error::AppError, routes::{lifts, resorts, slopes}};
+use crate::{
+    error::AppError,
+    routes::{lifts, resorts, slopes},
+};
 
 pub async fn import_geojson(
     db: web::Data<sqlx::MySqlPool>,

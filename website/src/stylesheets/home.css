@@ -1,43 +1,132 @@
-/* ============================= */
-/* Zentriertes Layout            */
-/* ============================= */
+.home-page {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 2rem 2rem 4rem;
+}
 
-.page-container {
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    text-align: center;
-    padding: 4vh 2vw;
+.hero-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(280px, 0.9fr);
+  gap: 1.5rem;
+  align-items: stretch;
+}
+
+.hero-copy,
+.hero-stats-card,
+.featured-card {
+  background: rgba(255, 255, 255, 0.86);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(202, 218, 229, 0.8);
+  border-radius: 28px;
+  box-shadow: 0 22px 60px rgba(16, 33, 47, 0.09);
+}
+
+.hero-copy {
+  padding: 2.4rem;
+  text-align: left;
+}
+
+.hero-copy h1 {
+  font-size: clamp(2.7rem, 6vw, 4.8rem);
+  max-width: 10ch;
+}
+
+.hero-text {
+  max-width: 55ch;
+  color: #355265;
+}
+
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  margin-top: 1.3rem;
 }
 
 .home-button {
-    display: inline-flex;           /* flex, damit Padding & Zentrierung funktioniert */
-    justify-content: center;        /* Text mittig */
-    align-items: center;
-    text-align: center;
-    text-decoration: none;          /* Unterstrich entfernen */
-
-    margin: 10px;
-    min-width: 220px;
-    padding: 14px 20px;
-    font-size: 1rem;
-    font-weight: bold;
-    color: white;
-
-    background-color: #1e6bd6;
-    border: 0;                      /* keine Linie */
-    border-radius: 8px;
-    cursor: pointer;
-
-    transition: background-color 0.2s, transform 0.1s, box-shadow 0.1s;
-
-    /* Wichtig für <a>-Tags */
-    -webkit-appearance: none;
-    -moz-appearance: none;
-    appearance: none;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  text-decoration: none;
+  min-width: 210px;
+  padding: 0.95rem 1.3rem;
+  border-radius: 999px;
+  background: #1558a6;
+  color: #fff;
+  font-weight: 700;
+  box-shadow: 0 14px 30px rgba(21, 88, 166, 0.22);
 }
 
-.home-button:hover {
-    background-color: #1553a8;
+.home-button.secondary {
+  background: #edf5fb;
+  color: #134572;
+  box-shadow: none;
+}
+
+.hero-stats-card {
+  padding: 1.8rem;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.hero-stats-card h2 {
+  font-size: 1.6rem;
+}
+
+.hero-stat-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.hero-stat-grid span {
+  color: #5c7484;
+}
+
+.hero-stat-grid strong {
+  display: block;
+  font-size: 2.4rem;
+}
+
+.featured-section {
+  margin-top: 2.4rem;
+}
+
+.section-heading {
+  text-align: left;
+  margin-bottom: 1rem;
+}
+
+.featured-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+}
+
+.featured-card {
+  padding: 1.4rem;
+  text-decoration: none;
+  color: inherit;
+  text-align: left;
+}
+
+.featured-card h3 {
+  font-size: 1.35rem;
+  margin-bottom: 0.7rem;
+}
+
+.featured-location {
+  color: #557181;
+  margin: 0 0 0.4rem;
+}
+
+@media (max-width: 880px) {
+  .home-page {
+    padding-inline: 1rem;
+  }
+
+  .hero-shell {
+    grid-template-columns: 1fr;
+  }
 }

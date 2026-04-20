@@ -63,9 +63,9 @@
 //! Author: OpenSlope Team
 //! Version: 1.0.0
 
-use actix_web::{web, App, HttpServer};
-use sqlx::MySqlPool;
+use actix_web::{App, HttpServer, web};
 use dotenvy::dotenv;
+use sqlx::MySqlPool;
 use std::env;
 
 mod auth;
@@ -79,13 +79,13 @@ mod user_service;
 mod utils;
 
 use auth::ApiKeyAuth;
+use routes::geojson_import::*;
+use routes::lifts::*;
 use routes::resorts::*;
 use routes::slopes::*;
-use routes::lifts::*;
 use routes::status::*;
-use routes::geojson_import::*;
 
-use routes::auth::{signup, signin, me};
+use routes::auth::{me, signin, signup};
 
 use actix_cors::Cors;
 
@@ -117,8 +117,9 @@ async fn main() -> std::io::Result<()> {
     dotenv().ok();
 
     // Get database URL from environment or use default
-    let database_url = env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "mysql://username:password@Central.local:3306/openslope_db".to_string());
+    let database_url = env::var("DATABASE_URL").unwrap_or_else(|_| {
+        "mysql://username:password@Central.local:3306/openslope_db".to_string()
+    });
 
     // Establish database connection pool
     let pool = MySqlPool::connect(&database_url)
@@ -134,59 +135,66 @@ async fn main() -> std::io::Result<()> {
             // Configure CORS middleware for cross-origin requests
             .wrap(
                 Cors::default()
-                    .allow_any_origin()   // erlaubt Zugriff von jedem Frontend (für Entwicklung)
-                    .allow_any_method()   // GET, POST, PUT, DELETE etc.
-                    .allow_any_header()   // alle Header erlaubt
-                    .supports_credentials() // erlaubt Cookies und Credentials
+                    .allow_any_origin() // erlaubt Zugriff von jedem Frontend (für Entwicklung)
+                    .allow_any_method() // GET, POST, PUT, DELETE etc.
+                    .allow_any_header() // alle Header erlaubt
+                    .supports_credentials(), // erlaubt Cookies und Credentials
             )
             // Share database pool across all handlers
             .app_data(web::Data::new(pool.clone()))
-
             // Public routes - no authentication required
             .route("/signup", web::post().to(signup))
             .route("/signin", web::post().to(signin))
-
             // Protected routes - require API key authentication
             .service(
                 web::scope("")
                     .wrap(ApiKeyAuth { pool: pool.clone() })
-
                     // Resorts endpoints
                     .route("/resorts", web::get().to(get_resorts))
                     .route("/resorts/{id}", web::get().to(get_resort))
                     .route("/resorts", web::post().to(create_resort))
                     .route("/resorts/{id}", web::put().to(update_resort))
                     .route("/resorts/{id}", web::delete().to(delete_resort))
-
                     // Slopes endpoints
                     .route("/slopes", web::get().to(get_slopes))
                     .route("/slopes/{id}", web::get().to(get_slope))
                     .route("/slopes", web::post().to(create_slope))
                     .route("/slopes/{id}", web::put().to(update_slope))
                     .route("/slopes/{id}", web::delete().to(delete_slope))
-                    .route("/slopes/by_resort/{resort_id}", web::get().to(get_slopes_by_resort))
-                    .route("/slopes/by_resort/{resort_id}", web::delete().to(delete_slopes_by_resort))
-
+                    .route(
+                        "/slopes/by_resort/{resort_id}",
+                        web::get().to(get_slopes_by_resort),
+                    )
+                    .route(
+                        "/slopes/by_resort/{resort_id}",
+                        web::delete().to(delete_slopes_by_resort),
+                    )
                     // Lifts endpoints
                     .route("/lifts", web::get().to(get_lifts))
                     .route("/lifts/{id}", web::get().to(get_lift))
                     .route("/lifts", web::post().to(create_lift))
                     .route("/lifts/{id}", web::put().to(update_lift))
                     .route("/lifts/{id}", web::delete().to(delete_lift))
-                    .route("/lifts/by_resort/{resort_id}", web::get().to(get_lifts_by_resort))
-                    .route("/lifts/by_resort/{resort_id}", web::delete().to(delete_lifts_by_resort))
-
+                    .route(
+                        "/lifts/by_resort/{resort_id}",
+                        web::get().to(get_lifts_by_resort),
+                    )
+                    .route(
+                        "/lifts/by_resort/{resort_id}",
+                        web::delete().to(delete_lifts_by_resort),
+                    )
                     // GeoJSON import endpoints
                     .route("/import/geojson/{resource}", web::post().to(import_geojson))
-
                     // Status and scraping endpoints
                     .route("/scrape-runs", web::get().to(get_scrape_runs))
                     .route("/scrape-runs/{id}", web::get().to(get_scrape_run))
                     .route("/status-snapshots", web::get().to(get_status_snapshots))
-                    .route("/resorts/{resort_id}/status-snapshots", web::get().to(get_status_snapshots_by_resort))
-
+                    .route(
+                        "/resorts/{resort_id}/status-snapshots",
+                        web::get().to(get_status_snapshots_by_resort),
+                    )
                     // User endpoints
-                    .route("/me", web::get().to(me))
+                    .route("/me", web::get().to(me)),
             )
     })
     // Bind server to localhost on port 8080

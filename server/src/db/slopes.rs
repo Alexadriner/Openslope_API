@@ -41,20 +41,22 @@ pub async fn get_all(pool: &MySqlPool) -> Result<Vec<SlopeWithResorts>, sqlx::Er
 
     for row in rows {
         let slope_id = row.slope_id.clone();
-        let slope = slope_map.entry(slope_id.clone()).or_insert_with(|| SlopeWithResorts {
-            slope: SlopeRow {
-                id: row.slope_id.clone(),
-                name: row.slope_name.clone(),
-                difficulty: row.slope_difficulty.clone(),
-                status: row.slope_status.clone(),
-                grooming: row.slope_grooming.clone(),
-                geometry: row.slope_geometry.clone().unwrap_or_default(),
-                websites: row.slope_websites.clone(),
-                sources: row.slope_sources.clone(),
-                places: Vec::new(),
-            },
-            resorts: Vec::new(),
-        });
+        let slope = slope_map
+            .entry(slope_id.clone())
+            .or_insert_with(|| SlopeWithResorts {
+                slope: SlopeRow {
+                    id: row.slope_id.clone(),
+                    name: row.slope_name.clone(),
+                    difficulty: row.slope_difficulty.clone(),
+                    status: row.slope_status.clone(),
+                    grooming: row.slope_grooming.clone(),
+                    geometry: row.slope_geometry.clone().unwrap_or_default(),
+                    websites: row.slope_websites.clone(),
+                    sources: row.slope_sources.clone(),
+                    places: Vec::new(),
+                },
+                resorts: Vec::new(),
+            });
 
         if let Some(resort_id) = row.resort_id {
             slope.resorts.push(ResortRow {
@@ -194,20 +196,22 @@ pub async fn get_by_resort(
 
     for row in rows {
         let slope_id = row.slope_id.clone();
-        let slope = slope_map.entry(slope_id.clone()).or_insert_with(|| SlopeWithResorts {
-            slope: SlopeRow {
-                id: row.slope_id.clone(),
-                name: row.slope_name.clone(),
-                difficulty: row.slope_difficulty.clone(),
-                status: row.slope_status.clone(),
-                grooming: row.slope_grooming.clone(),
-                geometry: row.slope_geometry.clone().unwrap_or_default(),
-                websites: row.slope_websites.clone(),
-                sources: row.slope_sources.clone(),
-                places: Vec::new(),
-            },
-            resorts: Vec::new(),
-        });
+        let slope = slope_map
+            .entry(slope_id.clone())
+            .or_insert_with(|| SlopeWithResorts {
+                slope: SlopeRow {
+                    id: row.slope_id.clone(),
+                    name: row.slope_name.clone(),
+                    difficulty: row.slope_difficulty.clone(),
+                    status: row.slope_status.clone(),
+                    grooming: row.slope_grooming.clone(),
+                    geometry: row.slope_geometry.clone().unwrap_or_default(),
+                    websites: row.slope_websites.clone(),
+                    sources: row.slope_sources.clone(),
+                    places: Vec::new(),
+                },
+                resorts: Vec::new(),
+            });
 
         slope.resorts.push(ResortRow {
             id: row.resort_id,

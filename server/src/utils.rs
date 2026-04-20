@@ -14,7 +14,9 @@ pub fn parse_feature_id(feature: &Value) -> Option<String> {
 }
 
 pub fn parse_related_ids(properties: &Value) -> Vec<String> {
-    let ski_areas = properties.get("skiAreas").or_else(|| properties.get("ski_areas"));
+    let ski_areas = properties
+        .get("skiAreas")
+        .or_else(|| properties.get("ski_areas"));
     match ski_areas {
         Some(Value::Array(items)) => items
             .iter()
@@ -22,8 +24,11 @@ pub fn parse_related_ids(properties: &Value) -> Vec<String> {
                 if let Some(value) = extract_string(item) {
                     return Some(value);
                 }
-                item.get("id").and_then(extract_string)
-                    .or_else(|| item.get("properties").and_then(|inner| inner.get("id")).and_then(extract_string))
+                item.get("id").and_then(extract_string).or_else(|| {
+                    item.get("properties")
+                        .and_then(|inner| inner.get("id"))
+                        .and_then(extract_string)
+                })
             })
             .collect(),
         Some(Value::String(id)) => vec![id.clone()],
@@ -136,13 +141,13 @@ fn extract_string(value: &Value) -> Option<String> {
 }
 
 fn parse_place(value: &Value) -> Option<Place> {
-    let localized_en = value.get("localized").and_then(|localized| localized.get("en"));
+    let localized_en = value
+        .get("localized")
+        .and_then(|localized| localized.get("en"));
 
     let place = Place {
         id: 0,
-        country_code: value
-            .get("iso3166_1Alpha2")
-            .and_then(extract_string),
+        country_code: value.get("iso3166_1Alpha2").and_then(extract_string),
         region_code: value.get("iso3166_2").and_then(extract_string),
         country_name: localized_en
             .and_then(|localized| localized.get("country"))

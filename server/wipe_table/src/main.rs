@@ -43,10 +43,10 @@
 use chrono::Local;
 use dotenvy::dotenv;
 use serde_json::Value;
+use std::env;
 use std::fs;
 use std::io::{self, Write};
 use std::path::PathBuf;
-use std::env;
 
 // =============================================================================
 // Configuration
@@ -155,11 +155,7 @@ fn generate_backup_filename(table: &str) -> String {
 }
 
 /// Save records to a JSON backup file
-fn save_backup(
-    backup_dir: &PathBuf,
-    table: &str,
-    records: &[Value],
-) -> Result<PathBuf, String> {
+fn save_backup(backup_dir: &PathBuf, table: &str, records: &[Value]) -> Result<PathBuf, String> {
     let filename = generate_backup_filename(table);
     let filepath = backup_dir.join(&filename);
 
@@ -170,8 +166,8 @@ fn save_backup(
         .map_err(|e| format!("Failed to write backup file: {}", e))?;
 
     // Verify the file was written and is non-empty
-    let metadata = fs::metadata(&filepath)
-        .map_err(|e| format!("Failed to verify backup file: {}", e))?;
+    let metadata =
+        fs::metadata(&filepath).map_err(|e| format!("Failed to verify backup file: {}", e))?;
 
     if metadata.len() == 0 {
         fs::remove_file(&filepath).ok();
@@ -223,7 +219,8 @@ fn parse_args() -> Result<CliArgs, String> {
     let mut table: Option<String> = None;
     let mut backup_dir = PathBuf::from("./backups");
     let mut dry_run = false;
-    let mut api_base_url = env::var("API_BASE_URL").unwrap_or_else(|_| DEFAULT_API_BASE_URL.to_string());
+    let mut api_base_url =
+        env::var("API_BASE_URL").unwrap_or_else(|_| DEFAULT_API_BASE_URL.to_string());
     let mut api_key = env::var("API_KEY").unwrap_or_else(|_| DEFAULT_API_KEY.to_string());
 
     let mut i = 1;
@@ -353,7 +350,10 @@ fn main() {
     println!("Configuration:");
     println!("  Table:        {}", args.table);
     println!("  Backup dir:   {}", args.backup_dir.display());
-    println!("  Dry run:      {}", if args.dry_run { "yes" } else { "no" });
+    println!(
+        "  Dry run:      {}",
+        if args.dry_run { "yes" } else { "no" }
+    );
     println!("  API URL:      {}\n", args.api_base_url);
 
     // Step 1: Fetch all records from the table
@@ -366,7 +366,10 @@ fn main() {
     };
 
     let total_records = records.len();
-    println!("Found {} records in table '{}'\n", total_records, args.table);
+    println!(
+        "Found {} records in table '{}'\n",
+        total_records, args.table
+    );
 
     if total_records == 0 {
         println!("Table is empty. Nothing to do.");
@@ -415,10 +418,11 @@ fn main() {
 
     for record in &records {
         // Extract ID from record - different tables may have different ID field names
-        let id = record
-            .get("id")
-            .and_then(|v| v.as_i64())
-            .or_else(|| record.get("id").and_then(|v| Value::as_str(v).and_then(|s| s.parse().ok())));
+        let id = record.get("id").and_then(|v| v.as_i64()).or_else(|| {
+            record
+                .get("id")
+                .and_then(|v| Value::as_str(v).and_then(|s| s.parse().ok()))
+        });
 
         match id {
             Some(id) => match delete_record(&args.api_base_url, &args.table, id, &args.api_key) {

@@ -1,84 +1,126 @@
-/* Base Style for every Webpage */
-
-/* ============================= */
-/* Global Base Styles            */
-/* ============================= */
-
-html, body {
-    margin: 0;
-    padding: 0;
-    background-color: white;
-    color: black;
-    font-family: Arial, sans-serif;
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100%;
 }
 
-/* ============================= */
-/* Seiten-Layout                 */
-/* ============================= */
-
-/* Grundcontainer für alle Seiten */
-.page-container {
-    padding-left: 2vw;
-    padding-right: 2vw;
+body {
+  background:
+    radial-gradient(circle at top left, rgba(189, 230, 255, 0.45), transparent 28%),
+    linear-gradient(180deg, #f5fbff 0%, #eef5f8 48%, #f8fbfc 100%);
+  color: #10212f;
+  font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
 }
 
-/* ============================= */
-/* Text                          */
-/* ============================= */
-
-p, span, div {
-    font-size: 1rem;
-    line-height: 1.5;
+a {
+  color: #1558a6;
 }
 
-/* ============================= */
-/* Überschriften                 */
-/* ============================= */
-
-h1, h2, h3, h4, h5, h6 {
-    font-size: 2.5rem;   /* 2,5x größer als normaler Text */
-    font-weight: bold;
-    margin: 0.6em 0;
-}
-
-/* ============================= */
-/* Buttons                       */
-/* ============================= */
-
+p,
+span,
+div,
+li,
+td,
+th,
+label,
+input,
 button {
-    min-width: 220px;
-    padding: 14px 20px;
-    font-size: 1rem;
-    font-weight: bold;
-    color: white;
-    background-color: #1e6bd6;
-    border: none;
-    border-radius: 8px;
-    cursor: pointer;
-    transition: background-color 0.2s, transform 0.1s, box-shadow 0.1s;
+  font-size: 1rem;
+  line-height: 1.5;
 }
 
-button:hover {
-    background-color: #1553a8;
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  margin: 0 0 0.6em;
+  line-height: 1.1;
+  color: #0f2231;
 }
 
-/* ============================= */
-/* Input Styling                 */
-/* ============================= */
+.page-container {
+  padding-inline: 2vw;
+}
 
+.eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #1f6f8b;
+  margin-bottom: 0.8rem;
+}
+
+.error-message {
+  color: #b42318;
+}
+
+.info-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.4rem 0.8rem;
+  border-radius: 999px;
+  background: #dff2f8;
+  color: #114b5f;
+  font-weight: 600;
+}
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+button,
+.button-like {
+  min-width: 180px;
+  padding: 0.9rem 1.25rem;
+  font-size: 1rem;
+  font-weight: 700;
+  color: white;
+  background: #1558a6;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: transform 0.16s ease, box-shadow 0.16s ease, background-color 0.16s ease;
+  box-shadow: 0 12px 28px rgba(21, 88, 166, 0.22);
+}
+
+button:hover,
+.button-like:hover {
+  background: #0f4a8d;
+  transform: translateY(-1px);
+}
+
+input,
 input:not(.search-input) {
-    width: 320px;
-    max-width: 90%;
-    padding: 12px 16px;
-    margin: 20px 0;
-    font-size: 1rem;
-    border-radius: 8px;
-    border: 1px solid #ccc;
-    outline: none;
-    transition: border-color 0.2s, box-shadow 0.2s;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.85rem 1rem;
+  font-size: 1rem;
+  border-radius: 14px;
+  border: 1px solid #c9d7e2;
+  outline: none;
+  background: rgba(255, 255, 255, 0.88);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 input:focus {
-    border-color: #1e88e5;
-    box-shadow: 0 0 0 3px rgba(30, 136, 229, 0.2);
+  border-color: #1a73b8;
+  box-shadow: 0 0 0 4px rgba(26, 115, 184, 0.12);
 }

@@ -150,9 +150,9 @@
 //! Author: OpenSlope Team
 //! Version: 1.0.0
 
-use sqlx::MySqlPool;
 use crate::security::api_key::generate_api_key;
 use crate::security::hash::hash_secret;
+use sqlx::MySqlPool;
 
 /// Create a new user with secure password and API key handling
 ///
@@ -242,7 +242,7 @@ pub async fn create_user(
     // 1. API-Key generieren
     // Generates a cryptographically secure 32-byte API key encoded in URL-safe base64
     let api_key_plain = generate_api_key();
-    
+
     // 2. Hashes erzeugen
     // Hash both the API key and password using Argon2 for secure storage
     let api_key_hash = hash_secret(&api_key_plain);
@@ -252,14 +252,14 @@ pub async fn create_user(
     // Insert the new user into the database with hashed credentials
     // Default values: is_admin = 0 (false), subscription = 'Free'
     sqlx::query!(
-            r#"
+        r#"
             INSERT INTO users (name, email, password_hash, api_key, is_admin, subscription)
             VALUES (?, ?, ?, ?, 0, 'Free')
             "#,
-            name,
-            email,
-            password_hash,
-            api_key_hash
+        name,
+        email,
+        password_hash,
+        api_key_hash
     )
     .execute(pool)
     .await?;

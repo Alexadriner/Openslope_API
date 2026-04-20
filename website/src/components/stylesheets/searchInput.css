@@ -1,8 +1,8 @@
 .search-wrapper {
     position: relative;
-    width: 340px;      /* gewünschte Breite */
-    max-width: 90%;    /* responsive */
-    margin: 20px auto; /* 👈 zentriert horizontal */
+    width: min(420px, 100%);
+    max-width: 100%;
+    margin: 20px 0 0;
 }
 
 .search-wrapper input.search-input {
@@ -76,9 +76,21 @@
 .suggestion-item {
     padding: 10px 14px;
     cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+}
+
+.suggestion-item span {
+    color: #5a6f80;
+    font-size: 0.92rem;
 }
 
 .suggestion-item:hover {
     background-color: #1e88e5;
     color: white;
+}
+
+.suggestion-item:hover span {
+    color: rgba(255, 255, 255, 0.86);
 }

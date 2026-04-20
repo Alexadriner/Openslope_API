@@ -83,9 +83,9 @@
 //! Author: OpenSlope Team
 //! Version: 1.0.0
 
-pub mod resorts;
-pub mod lifts;
-pub mod slopes;
-pub mod status;
 pub mod auth;
 pub mod geojson_import;
+pub mod lifts;
+pub mod resorts;
+pub mod slopes;
+pub mod status;

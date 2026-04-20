@@ -110,7 +110,7 @@
 //! Author: OpenSlope Team
 //! Version: 1.0.0
 
-use actix_web::{web, HttpResponse, Responder};
+use actix_web::{HttpResponse, Responder, web};
 use serde::{Deserialize, Serialize};
 use sqlx::{MySqlPool, Row};
 
@@ -201,7 +201,9 @@ pub async fn get_scrape_runs(
                         id: row.try_get("id")?,
                         resort_id: row.try_get("resort_id")?,
                         source_name: row.try_get("source_name")?,
-                        started_at: row.try_get::<Option<String>, _>("started_at")?.unwrap_or_else(|| "".to_string()),
+                        started_at: row
+                            .try_get::<Option<String>, _>("started_at")?
+                            .unwrap_or_else(|| "".to_string()),
                         finished_at: row.try_get("finished_at")?,
                         success: row.try_get::<i8, _>("success")? != 0,
                         http_status: row.try_get("http_status")?,
@@ -225,10 +227,7 @@ pub async fn get_scrape_runs(
     }
 }
 
-pub async fn get_scrape_run(
-    db: web::Data<MySqlPool>,
-    id: web::Path<i64>,
-) -> impl Responder {
+pub async fn get_scrape_run(db: web::Data<MySqlPool>, id: web::Path<i64>) -> impl Responder {
     let result = sqlx::query(
         r#"
         SELECT id, resort_id, source_name,
@@ -249,7 +248,9 @@ pub async fn get_scrape_run(
                 id: row.try_get("id")?,
                 resort_id: row.try_get("resort_id")?,
                 source_name: row.try_get("source_name")?,
-                started_at: row.try_get::<Option<String>, _>("started_at")?.unwrap_or_else(|| "".to_string()),
+                started_at: row
+                    .try_get::<Option<String>, _>("started_at")?
+                    .unwrap_or_else(|| "".to_string()),
                 finished_at: row.try_get("finished_at")?,
                 success: row.try_get::<i8, _>("success")? != 0,
                 http_status: row.try_get("http_status")?,
@@ -308,7 +309,9 @@ pub async fn get_status_snapshots(
                         id: row.try_get("id")?,
                         run_id: row.try_get("run_id")?,
                         resort_id: row.try_get("resort_id")?,
-                        snapshot_time: row.try_get::<Option<String>, _>("snapshot_time")?.unwrap_or_else(|| "".to_string()),
+                        snapshot_time: row
+                            .try_get::<Option<String>, _>("snapshot_time")?
+                            .unwrap_or_else(|| "".to_string()),
                         lifts: SnapshotMetric {
                             open_count: row.try_get("lifts_open_count")?,
                             total_count: row.try_get("lifts_total_count")?,
@@ -382,7 +385,9 @@ pub async fn get_status_snapshots_by_resort(
                         id: row.try_get("id")?,
                         run_id: row.try_get("run_id")?,
                         resort_id: row.try_get("resort_id")?,
-                        snapshot_time: row.try_get::<Option<String>, _>("snapshot_time")?.unwrap_or_else(|| "".to_string()),
+                        snapshot_time: row
+                            .try_get::<Option<String>, _>("snapshot_time")?
+                            .unwrap_or_else(|| "".to_string()),
                         lifts: SnapshotMetric {
                             open_count: row.try_get("lifts_open_count")?,
                             total_count: row.try_get("lifts_total_count")?,
@@ -407,13 +412,19 @@ pub async fn get_status_snapshots_by_resort(
             match response {
                 Ok(response) => HttpResponse::Ok().json(response),
                 Err(err) => {
-                    eprintln!("GET /resorts/{{resort_id}}/status-snapshots error: {:?}", err);
+                    eprintln!(
+                        "GET /resorts/{{resort_id}}/status-snapshots error: {:?}",
+                        err
+                    );
                     HttpResponse::InternalServerError().finish()
                 }
             }
         }
         Err(err) => {
-            eprintln!("GET /resorts/{{resort_id}}/status-snapshots error: {:?}", err);
+            eprintln!(
+                "GET /resorts/{{resort_id}}/status-snapshots error: {:?}",
+                err
+            );
             HttpResponse::InternalServerError().finish()
         }
     }

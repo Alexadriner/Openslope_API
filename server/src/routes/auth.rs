@@ -125,15 +125,15 @@
 //! Author: OpenSlope Team
 //! Version: 1.0.0
 
-use actix_web::{web, HttpResponse, Responder};
+use actix_web::{HttpResponse, Responder, web};
 use serde::{Deserialize, Serialize};
 use sqlx::MySqlPool;
 use url::form_urlencoded;
 
-use crate::user_service::create_user;
 use crate::security::api_key::generate_api_key;
 use crate::security::hash::hash_secret;
 use crate::security::hash::verify_secret;
+use crate::user_service::create_user;
 
 #[derive(Deserialize)]
 pub struct SignupRequest {
@@ -164,18 +164,8 @@ pub struct AuthResponse {
     pub user: AuthUser,
 }
 
-pub async fn signup(
-    pool: web::Data<MySqlPool>,
-    data: web::Json<SignupRequest>,
-) -> impl Responder {
-    match create_user(
-        pool.get_ref(),
-        &data.username,
-        &data.email,
-        &data.password,
-    )
-    .await
-    {
+pub async fn signup(pool: web::Data<MySqlPool>, data: web::Json<SignupRequest>) -> impl Responder {
+    match create_user(pool.get_ref(), &data.username, &data.email, &data.password).await {
         Ok(api_key) => {
             let user = sqlx::query!(
                 r#"
@@ -209,10 +199,7 @@ pub async fn signup(
     }
 }
 
-pub async fn signin(
-    pool: web::Data<MySqlPool>,
-    data: web::Json<SigninRequest>,
-) -> impl Responder {
+pub async fn signin(pool: web::Data<MySqlPool>, data: web::Json<SigninRequest>) -> impl Responder {
     let email = data.email.as_deref().unwrap_or("").trim();
     let username = data.username.as_deref().unwrap_or("").trim();
     let identifier = if !email.is_empty() { email } else { username };
@@ -273,10 +260,7 @@ pub async fn signin(
     }
 }
 
-pub async fn me(
-    pool: web::Data<MySqlPool>,
-    req: actix_web::HttpRequest,
-) -> impl Responder {
+pub async fn me(pool: web::Data<MySqlPool>, req: actix_web::HttpRequest) -> impl Responder {
     let api_key = match form_urlencoded::parse(req.query_string().as_bytes())
         .find(|(k, _)| k == "api_key")
         .map(|(_, v)| v.to_string())

@@ -132,14 +132,8 @@
 //! Version: 1.0.0
 
 use argon2::{
-    password_hash::{
-        PasswordHash,
-        PasswordHasher,
-        PasswordVerifier,
-        SaltString,
-        rand_core::OsRng,
-    },
     Argon2,
+    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
 };
 
 /// Hash a secret (password or API key) using Argon2 algorithm

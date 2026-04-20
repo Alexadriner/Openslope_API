@@ -42,21 +42,23 @@ pub async fn get_all(pool: &MySqlPool) -> Result<Vec<LiftWithResorts>, sqlx::Err
 
     for row in rows {
         let lift_id = row.lift_id.clone();
-        let lift = lift_map.entry(lift_id.clone()).or_insert_with(|| LiftWithResorts {
-            lift: LiftRow {
-                id: row.lift_id.clone(),
-                name: row.lift_name.clone(),
-                r#type: row.lift_type.clone(),
-                status: row.lift_status.clone(),
-                capacity: row.lift_capacity,
-                duration: row.lift_duration,
-                geometry: row.lift_geometry.clone().unwrap_or_default(),
-                websites: row.lift_websites.clone(),
-                sources: row.lift_sources.clone(),
-                places: Vec::new(),
-            },
-            resorts: Vec::new(),
-        });
+        let lift = lift_map
+            .entry(lift_id.clone())
+            .or_insert_with(|| LiftWithResorts {
+                lift: LiftRow {
+                    id: row.lift_id.clone(),
+                    name: row.lift_name.clone(),
+                    r#type: row.lift_type.clone(),
+                    status: row.lift_status.clone(),
+                    capacity: row.lift_capacity,
+                    duration: row.lift_duration,
+                    geometry: row.lift_geometry.clone().unwrap_or_default(),
+                    websites: row.lift_websites.clone(),
+                    sources: row.lift_sources.clone(),
+                    places: Vec::new(),
+                },
+                resorts: Vec::new(),
+            });
 
         if let Some(resort_id) = row.resort_id {
             lift.resorts.push(ResortRow {
@@ -199,21 +201,23 @@ pub async fn get_by_resort(
 
     for row in rows {
         let lift_id = row.lift_id.clone();
-        let lift = lift_map.entry(lift_id.clone()).or_insert_with(|| LiftWithResorts {
-            lift: LiftRow {
-                id: row.lift_id.clone(),
-                name: row.lift_name.clone(),
-                r#type: row.lift_type.clone(),
-                status: row.lift_status.clone(),
-                capacity: row.lift_capacity,
-                duration: row.lift_duration,
-                geometry: row.lift_geometry.clone().unwrap_or_default(),
-                websites: row.lift_websites.clone(),
-                sources: row.lift_sources.clone(),
-                places: Vec::new(),
-            },
-            resorts: Vec::new(),
-        });
+        let lift = lift_map
+            .entry(lift_id.clone())
+            .or_insert_with(|| LiftWithResorts {
+                lift: LiftRow {
+                    id: row.lift_id.clone(),
+                    name: row.lift_name.clone(),
+                    r#type: row.lift_type.clone(),
+                    status: row.lift_status.clone(),
+                    capacity: row.lift_capacity,
+                    duration: row.lift_duration,
+                    geometry: row.lift_geometry.clone().unwrap_or_default(),
+                    websites: row.lift_websites.clone(),
+                    sources: row.lift_sources.clone(),
+                    places: Vec::new(),
+                },
+                resorts: Vec::new(),
+            });
 
         lift.resorts.push(ResortRow {
             id: row.resort_id,

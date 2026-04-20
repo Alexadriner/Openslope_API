@@ -3,13 +3,12 @@
 //! This module provides CRUD operations for lifts and the ability to query lifts
 //! by associated resort IDs.
 
-use actix_web::{web, HttpResponse, Responder};
+use actix_web::{HttpResponse, Responder, web};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
-    db,
-    dto,
+    db, dto,
     error::AppError,
     models::db::Place,
     utils::{parse_feature_id, parse_geometry_to_wkt, parse_places, parse_related_ids},
@@ -99,11 +98,15 @@ fn extract_optional_i32(value: Option<&Value>) -> Option<i32> {
 }
 
 fn map_lift_row(lift: db::lifts::LiftWithResorts) -> LiftResponse {
-    let resorts = lift.resorts.into_iter().map(|r| dto::resorts::ResortSummary {
-        id: r.id,
-        name: r.name,
-        places: r.places,
-    }).collect();
+    let resorts = lift
+        .resorts
+        .into_iter()
+        .map(|r| dto::resorts::ResortSummary {
+            id: r.id,
+            name: r.name,
+            places: r.places,
+        })
+        .collect();
 
     LiftResponse {
         id: lift.lift.id,
@@ -150,7 +153,10 @@ pub async fn create_lift(
     feature: web::Json<GeoJsonFeature>,
 ) -> Result<HttpResponse, AppError> {
     let payload = LiftPayload::from_feature(&feature)?;
-    if db::lifts::get_by_id(db.get_ref(), &payload.id).await?.is_some() {
+    if db::lifts::get_by_id(db.get_ref(), &payload.id)
+        .await?
+        .is_some()
+    {
         return Err(AppError::Conflict("Lift already exists".into()));
     }
 

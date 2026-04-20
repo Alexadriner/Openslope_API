@@ -3,13 +3,12 @@
 //! This module provides CRUD operations for slopes and the ability to query slopes
 //! by associated resort IDs.
 
-use actix_web::{web, HttpResponse, Responder};
+use actix_web::{HttpResponse, Responder, web};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
-    db,
-    dto,
+    db, dto,
     error::AppError,
     models::db::Place,
     utils::{parse_feature_id, parse_geometry_to_wkt, parse_places, parse_related_ids},
@@ -87,11 +86,15 @@ fn extract_optional_string(value: Option<&Value>) -> Option<String> {
 }
 
 fn map_slope_row(slope: db::slopes::SlopeWithResorts) -> SlopeResponse {
-    let resorts = slope.resorts.into_iter().map(|r| dto::resorts::ResortSummary {
-        id: r.id,
-        name: r.name,
-        places: r.places,
-    }).collect();
+    let resorts = slope
+        .resorts
+        .into_iter()
+        .map(|r| dto::resorts::ResortSummary {
+            id: r.id,
+            name: r.name,
+            places: r.places,
+        })
+        .collect();
 
     SlopeResponse {
         id: slope.slope.id,
@@ -137,7 +140,10 @@ pub async fn create_slope(
     feature: web::Json<GeoJsonFeature>,
 ) -> Result<HttpResponse, AppError> {
     let payload = SlopePayload::from_feature(&feature)?;
-    if db::slopes::get_by_id(db.get_ref(), &payload.id).await?.is_some() {
+    if db::slopes::get_by_id(db.get_ref(), &payload.id)
+        .await?
+        .is_some()
+    {
         return Err(AppError::Conflict("Slope already exists".into()));
     }
 

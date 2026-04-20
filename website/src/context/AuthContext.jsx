@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { getMe } from "../api/auth";
 
@@ -12,7 +13,7 @@ export function AuthProvider({ children }) {
     }
     try {
       return JSON.parse(raw);
-    } catch (_) {
+    } catch {
       return null;
     }
   });
@@ -29,7 +30,7 @@ export function AuthProvider({ children }) {
         const me = await getMe(apiKey);
         setUser(me);
         localStorage.setItem("user", JSON.stringify(me));
-      } catch (_) {
+      } catch {
         localStorage.removeItem("apiKey");
         localStorage.removeItem("user");
         setApiKey(null);

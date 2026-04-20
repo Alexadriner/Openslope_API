@@ -168,13 +168,13 @@
 //! Version: 1.0.0
 
 use actix_web::{
+    Error, HttpResponse,
     body::{BoxBody, MessageBody},
     dev::{Service, ServiceRequest, ServiceResponse, Transform},
-    http::Method,
     error::ErrorInternalServerError,
-    Error, HttpResponse,
+    http::Method,
 };
-use futures_util::future::{ok, Ready, LocalBoxFuture};
+use futures_util::future::{LocalBoxFuture, Ready, ok};
 use sqlx::MySqlPool;
 use std::{
     rc::Rc,
@@ -423,7 +423,11 @@ where
                 .unwrap_or(true);
 
             // Initialize request counters, resetting if necessary
-            let mut req_min: u32 = if reset_minute { 0 } else { user.requests_minute } as u32;
+            let mut req_min: u32 = if reset_minute {
+                0
+            } else {
+                user.requests_minute
+            } as u32;
             let mut req_mon: u32 = if reset_month { 0 } else { user.requests_month } as u32;
 
             // Get rate limits for user's subscription plan

@@ -34,12 +34,18 @@ pub async fn get_all(pool: &MySqlPool) -> Result<Vec<ResortRow>, sqlx::Error> {
     .fetch_all(pool)
     .await?;
 
-    let mut resorts = raw_resorts.into_iter().map(map_resort_row).collect::<Vec<_>>();
+    let mut resorts = raw_resorts
+        .into_iter()
+        .map(map_resort_row)
+        .collect::<Vec<_>>();
     populate_resort_places(pool, &mut resorts).await?;
     Ok(resorts)
 }
 
-pub async fn get_by_id(pool: &MySqlPool, resort_id: &str) -> Result<Option<ResortRow>, sqlx::Error> {
+pub async fn get_by_id(
+    pool: &MySqlPool,
+    resort_id: &str,
+) -> Result<Option<ResortRow>, sqlx::Error> {
     let mut resort = sqlx::query_as::<_, RawResortRow>(
         r#"
         SELECT
@@ -61,7 +67,8 @@ pub async fn get_by_id(pool: &MySqlPool, resort_id: &str) -> Result<Option<Resor
     .map(map_resort_row);
 
     if let Some(resort) = resort.as_mut() {
-        let places_by_resort = crate::db::places::get_for_resorts(pool, &[resort.id.clone()]).await?;
+        let places_by_resort =
+            crate::db::places::get_for_resorts(pool, &[resort.id.clone()]).await?;
         resort.places = places_by_resort
             .get(&resort.id)
             .cloned()
@@ -177,7 +184,10 @@ async fn populate_resort_places(
     pool: &MySqlPool,
     resorts: &mut [ResortRow],
 ) -> Result<(), sqlx::Error> {
-    let resort_ids = resorts.iter().map(|resort| resort.id.clone()).collect::<Vec<_>>();
+    let resort_ids = resorts
+        .iter()
+        .map(|resort| resort.id.clone())
+        .collect::<Vec<_>>();
     let places_by_resort = crate::db::places::get_for_resorts(pool, &resort_ids).await?;
 
     for resort in resorts {

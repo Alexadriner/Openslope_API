@@ -17,24 +17,21 @@ pub async fn get_for_resorts(
     pool: &MySqlPool,
     resort_ids: &[String],
 ) -> Result<HashMap<String, Vec<Place>>, sqlx::Error> {
-    get_places_for_entities(pool, resort_ids, "resort_places", "resort_id")
-        .await
+    get_places_for_entities(pool, resort_ids, "resort_places", "resort_id").await
 }
 
 pub async fn get_for_lifts(
     pool: &MySqlPool,
     lift_ids: &[String],
 ) -> Result<HashMap<String, Vec<Place>>, sqlx::Error> {
-    get_places_for_entities(pool, lift_ids, "lift_places", "lift_id")
-        .await
+    get_places_for_entities(pool, lift_ids, "lift_places", "lift_id").await
 }
 
 pub async fn get_for_slopes(
     pool: &MySqlPool,
     slope_ids: &[String],
 ) -> Result<HashMap<String, Vec<Place>>, sqlx::Error> {
-    get_places_for_entities(pool, slope_ids, "slope_places", "slope_id")
-        .await
+    get_places_for_entities(pool, slope_ids, "slope_places", "slope_id").await
 }
 
 pub async fn sync_resort_places(
@@ -42,8 +39,7 @@ pub async fn sync_resort_places(
     resort_id: &str,
     places: &[Place],
 ) -> Result<(), sqlx::Error> {
-    sync_places_for_entity(pool, resort_id, places, "resort_places", "resort_id")
-        .await
+    sync_places_for_entity(pool, resort_id, places, "resort_places", "resort_id").await
 }
 
 pub async fn sync_lift_places(
@@ -51,8 +47,7 @@ pub async fn sync_lift_places(
     lift_id: &str,
     places: &[Place],
 ) -> Result<(), sqlx::Error> {
-    sync_places_for_entity(pool, lift_id, places, "lift_places", "lift_id")
-        .await
+    sync_places_for_entity(pool, lift_id, places, "lift_places", "lift_id").await
 }
 
 pub async fn sync_slope_places(
@@ -60,8 +55,7 @@ pub async fn sync_slope_places(
     slope_id: &str,
     places: &[Place],
 ) -> Result<(), sqlx::Error> {
-    sync_places_for_entity(pool, slope_id, places, "slope_places", "slope_id")
-        .await
+    sync_places_for_entity(pool, slope_id, places, "slope_places", "slope_id").await
 }
 
 pub async fn delete_resort_places(pool: &MySqlPool, resort_id: &str) -> Result<(), sqlx::Error> {
@@ -120,14 +114,17 @@ async fn get_places_for_entities(
 
     let mut places_by_entity = HashMap::<String, Vec<Place>>::new();
     for row in rows {
-        places_by_entity.entry(row.entity_id).or_default().push(Place {
-            id: row.id,
-            country_code: row.country_code,
-            region_code: row.region_code,
-            country_name: row.country_name,
-            region_name: row.region_name,
-            locality: row.locality,
-        });
+        places_by_entity
+            .entry(row.entity_id)
+            .or_default()
+            .push(Place {
+                id: row.id,
+                country_code: row.country_code,
+                region_code: row.region_code,
+                country_name: row.country_name,
+                region_name: row.region_name,
+                locality: row.locality,
+            });
     }
 
     Ok(places_by_entity)

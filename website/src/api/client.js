@@ -16,7 +16,7 @@
  * @version 1.0.0
  */
 
-import { cacheMiddleware, getCachedResponse, cacheResponse, getCacheStats, clearCache } from './cache.js';
+import { getCachedResponse, cacheResponse, removeCachedResponse } from './cache.js';
 import { getTransformationFunction, getSpecializedTransformationFunction } from './models/index.js';
 
 // API configuration constants
@@ -268,10 +268,6 @@ export function clearCacheForEndpoint(path, options = {}) {
   const transformation = options.transformation;
   const specializedTransformation = options.specializedTransformation;
 
-  // This is a simplified version - in a real implementation, you might want
-  // to clear all variations of the endpoint
-  // For now, we'll use the cache middleware's remove function
-  const { removeCachedResponse } = require('./cache.js');
   removeCachedResponse(url.toString(), { apiKey, transformation, specializedTransformation });
 }
 

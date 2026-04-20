@@ -142,7 +142,6 @@ class ApiCache {
    * Remove expired entries from cache
    */
   cleanup() {
-    const now = Date.now();
     for (const [key, entry] of this.cache.entries()) {
       if (entry.isExpired()) {
         this.cache.delete(key);
@@ -155,7 +154,6 @@ class ApiCache {
    * @returns {Object} - Cache statistics
    */
   getStats() {
-    const now = Date.now();
     let validCount = 0;
     let expiredCount = 0;
 
