@@ -69,9 +69,14 @@ use dotenvy::dotenv;
 use std::env;
 
 mod auth;
+mod db;
+mod dto;
+mod error;
+mod models;
 mod routes;
 mod security;
 mod user_service;
+mod utils;
 
 use auth::ApiKeyAuth;
 use routes::resorts::*;
@@ -83,7 +88,6 @@ use routes::geojson_import::*;
 use routes::auth::{signup, signin, me};
 
 use actix_cors::Cors;
-use actix_web::web::JsonConfig;
 
 /// Main application entry point
 ///

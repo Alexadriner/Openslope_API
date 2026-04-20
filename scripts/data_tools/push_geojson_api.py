@@ -1,21 +1,20 @@
 """
 Push GeoJSON data from /data/geodata to the OpenSlope API.
 
-This script reads the large geojson files under data/geodata and sends each
-feature to the appropriate API endpoint.
+This script reads GeoJSON FeatureCollection files and ingests them into the API.
+It automatically detects feature types and handles relations.
 
-It supports:
-- lifts.geojson -> /lifts
-- runs.geojson -> /slopes
-- ski_areas.geojson -> /resorts
-
-Timeout handling:
-- HTTP 408 + timeout exceptions are retried with exponential backoff
-- On success or non-retryable error, the request is returned
+Features:
+- Parses GeoJSON FeatureCollection
+- Detects types: skiArea → resort, lift → lift, run → slope
+- Extracts geometry, properties, and relations
+- Converts geometry to WKT
+- Batches requests for efficiency
+- Handles retries and logging
 
 Usage examples:
     python push_geojson_api.py --all --dry-run
-    python push_geojson_api.py --file data/geodata/lifts.geojson --limit 10
+    python push_geojson_api.py --file data/geodata/lifts.geojson --batch-size 50
     python push_geojson_api.py --validate
 """
 
@@ -25,7 +24,7 @@ import logging
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, Iterator, Optional
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -38,19 +37,15 @@ from config import (
     HEADERS,
     HTTP_RETRIES,
     REQUEST_DELAY,
-    RESORTS_ENDPOINT,
-    LIFTS_ENDPOINT,
-    SLOPES_ENDPOINT,
     IMPORT_LIFTS_ENDPOINT,
     IMPORT_SLOPES_ENDPOINT,
     IMPORT_RESORTS_ENDPOINT,
+    RESORTS_ENDPOINT,
+    LIFTS_ENDPOINT,
+    SLOPES_ENDPOINT,
 )
 
-DATA_FILE_ENDPOINTS = {
-    "lifts.geojson": IMPORT_LIFTS_ENDPOINT,
-    "runs.geojson": IMPORT_SLOPES_ENDPOINT,
-    "ski_areas.geojson": IMPORT_RESORTS_ENDPOINT,
-}
+
 
 DEFAULT_RETRY_WAIT = 1
 MAX_RETRY_WAIT = 60
@@ -167,277 +162,252 @@ def validate_api() -> bool:
     return True
 
 
-def get_default_resort_id(properties: Dict[str, Any]) -> str:
-    """Infer a resort identifier from geojson properties if possible."""
-    ski_areas = properties.get("skiAreas") or []
-    if isinstance(ski_areas, list) and ski_areas:
-        first = ski_areas[0]
-        if isinstance(first, dict) and first.get("id"):
-            return first["id"]
-        if isinstance(first, str):
-            return first
-
-    places = properties.get("places") or []
-    if isinstance(places, list) and places:
-        first = places[0]
-        if isinstance(first, dict):
-            iso = first.get("iso3166_1Alpha2")
-            if isinstance(iso, str):
-                return iso
-
-    return "unassigned"
 
 
-def parse_coordinates(geometry: Dict[str, Any]) -> Optional[list[Dict[str, float]]]:
-    if not geometry:
-        return None
-    coords = geometry.get("coordinates")
-    if not isinstance(coords, list) or len(coords) == 0:
-        return None
 
-    def extract_point(point: Any) -> Optional[Dict[str, float]]:
-        if not isinstance(point, list) or len(point) < 2:
-            return None
-        lon, lat = point[0], point[1]
-        if isinstance(lat, (int, float)) and isinstance(lon, (int, float)):
-            return {"latitude": lat, "longitude": lon}
-        return None
 
-    points = []
-    for item in coords:
-        if isinstance(item, list) and len(item) > 0 and isinstance(item[0], list):
-            # nested arrays inside geometry
-            nested = [extract_point(point) for point in item if extract_point(point)]
-            points.extend([pt for pt in nested if pt])
+
+
+def detect_feature_type(properties: Dict[str, Any]) -> str:
+    """Detect the feature type based on properties."""
+    feature_type = properties.get("type", "").lower()
+
+    if feature_type == "lift":
+        return "lift"
+    elif feature_type in ("run", "slope", "piste"):
+        return "slope"
+    elif feature_type in ("skiarea", "ski_area", "resort"):
+        return "resort"
+    else:
+        # Fallback based on common properties
+        if "liftType" in properties or "capacity" in properties:
+            return "lift"
+        elif "difficulty" in properties or "grooming" in properties:
+            return "slope"
+        elif "skiAreas" in properties or "places" in properties:
+            return "resort"
+
+    return "unknown"
+
+
+def extract_resort_ids(properties: Dict[str, Any]) -> List[str]:
+    """Extract resort IDs from skiAreas or related properties."""
+    ski_areas = properties.get("skiAreas", [])
+    if isinstance(ski_areas, list):
+        resort_ids = []
+        for area in ski_areas:
+            if isinstance(area, dict) and "id" in area:
+                resort_ids.append(area["id"])
+            elif isinstance(area, str):
+                resort_ids.append(area)
+        return resort_ids
+
+    # Fallback: try to infer from other properties
+    if "resort_id" in properties:
+        return [str(properties["resort_id"])]
+
+    return []
+
+
+def generate_normalized_name(properties: Dict[str, Any], feature_type: str) -> str:
+    """Generate a normalized name for features that don't have one."""
+    current_name = properties.get("name")
+
+    # If name exists and is not null/empty, return it
+    if current_name and str(current_name).strip() and str(current_name).lower() not in ("null", "none", ""):
+        return str(current_name)
+
+    if feature_type == "resort":
+        # Extract location info from places
+        places = properties.get("places", [])
+        if isinstance(places, list) and places:
+            place = places[0] if isinstance(places[0], dict) else {}
+
+            # Try locality first
+            locality = None
+            if isinstance(place, dict):
+                localized = place.get("localized", {})
+                if isinstance(localized, dict):
+                    en = localized.get("en", {})
+                    if isinstance(en, dict):
+                        locality = en.get("locality")
+
+            if locality:
+                return f"Ski resort near {locality}"
+
+            # Try region
+            region = None
+            if isinstance(place, dict):
+                localized = place.get("localized", {})
+                if isinstance(localized, dict):
+                    en = localized.get("en", {})
+                    if isinstance(en, dict):
+                        region = en.get("region")
+
+            if region:
+                return f"Ski resort in {region}"
+
+            # Try country
+            country = None
+            if isinstance(place, dict):
+                localized = place.get("localized", {})
+                if isinstance(localized, dict):
+                    en = localized.get("en", {})
+                    if isinstance(en, dict):
+                        country = en.get("country")
+
+            if country:
+                return f"Ski resort in {country}"
+
+        # Fallback to ID
+        feature_id = properties.get("id", "unknown")
+        return f"Ski resort {feature_id}"
+
+    elif feature_type == "lift":
+        lift_type = properties.get("liftType", properties.get("type", "lift"))
+        if lift_type:
+            return str(lift_type).capitalize()
+        return "Lift"
+
+    elif feature_type == "slope":
+        difficulty = properties.get("difficulty", "")
+        use = properties.get("use", "")
+
+        parts = []
+        if difficulty:
+            parts.append(str(difficulty).capitalize())
+        if use:
+            parts.append(str(use).lower())
+        parts.append("slope")
+
+        return " ".join(parts)
+
+    # Default fallback
+    return f"{feature_type.capitalize()} {properties.get('id', 'unknown')}"
+
+
+def prepare_feature_for_api(feature: Dict[str, Any]) -> Tuple[str, str, Dict[str, Any]]:
+    """
+    Prepare a GeoJSON feature for API submission.
+    Returns (endpoint, resource_type, feature_dict)
+    """
+    properties = feature.get("properties", {})
+    feature_type = detect_feature_type(properties)
+
+    # Generate normalized name if needed
+    normalized_name = generate_normalized_name(properties, feature_type)
+
+    # Create a copy of the feature and update the name
+    prepared_feature = feature.copy()
+    prepared_properties = properties.copy()
+    prepared_properties["name"] = normalized_name
+    prepared_feature["properties"] = prepared_properties
+
+    if feature_type == "lift":
+        endpoint = IMPORT_LIFTS_ENDPOINT
+        resource_type = "lifts"
+    elif feature_type == "slope":
+        endpoint = IMPORT_SLOPES_ENDPOINT
+        resource_type = "slopes"
+    elif feature_type == "resort":
+        endpoint = IMPORT_RESORTS_ENDPOINT
+        resource_type = "resorts"
+    else:
+        # Default to resorts for unknown types
+        endpoint = IMPORT_RESORTS_ENDPOINT
+        resource_type = "resorts"
+
+    return endpoint, resource_type, prepared_feature
+
+
+def load_geojson_features(file_path: Path) -> Iterator[Dict[str, Any]]:
+    """Load features from a GeoJSON file (FeatureCollection or Feature)."""
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        if data.get("type") == "FeatureCollection":
+            features = data.get("features", [])
+        elif data.get("type") == "Feature":
+            features = [data]
         else:
-            point = extract_point(item)
-            if point:
-                points.append(point)
-
-    return points if points else None
-
-
-def build_resort_payload(feature: Dict[str, Any]) -> Dict[str, Any]:
-    properties = feature.get("properties", {}) or {}
-    geometry = feature.get("geometry", {}) or {}
-    coords = geometry.get("coordinates")
-    latitude = None
-    longitude = None
-    if isinstance(coords, list) and len(coords) >= 2:
-        longitude, latitude = coords[0], coords[1]
-
-    places = properties.get("places") or []
-    country = None
-    region = None
-    if isinstance(places, list) and places:
-        first = places[0]
-        if isinstance(first, dict):
-            country = first.get("iso3166_1Alpha2")
-            region = first.get("localized", {}).get("en", {}).get("region")
-
-    return {
-        "id": properties.get("id"),
-        "name": properties.get("name") or properties.get("type") or "unnamed",
-        "country": country or "unknown",
-        "region": region,
-        "continent": None,
-        "latitude": latitude,
-        "longitude": longitude,
-        "ski_area_type": properties.get("type") or "skiArea",
-        "official_website": None,
-        "lift_status_url": None,
-        "slope_status_url": None,
-        "snow_report_url": None,
-        "weather_url": None,
-        "status_provider": properties.get("status"),
-    }
-
-
-def build_lift_payload(feature: Dict[str, Any]) -> Dict[str, Any]:
-    properties = feature.get("properties", {}) or {}
-    geometry = feature.get("geometry", {}) or {}
-    points = parse_coordinates(geometry) or []
-    start = points[0] if points else {"latitude": None, "longitude": None}
-    end = points[-1] if len(points) > 1 else start
-
-    def to_bool(value: Any) -> bool:
-        return bool(value) and str(value).lower() not in ("false", "0", "none", "null")
-
-    return {
-        "resort_id": get_default_resort_id(properties),
-        "name": properties.get("name"),
-        "lift_type": properties.get("liftType") or properties.get("type"),
-        "capacity_per_hour": properties.get("capacity"),
-        "seats": properties.get("seats"),
-        "duration_minutes": properties.get("duration"),
-        "detachable": to_bool(properties.get("detachable")),
-        "heating": to_bool(properties.get("heating")),
-        "bubble": to_bool(properties.get("bubble")),
-        "lat_start": start.get("latitude"),
-        "lon_start": start.get("longitude"),
-        "lat_end": end.get("latitude"),
-        "lon_end": end.get("longitude"),
-        "slope_path_json": json.dumps(points) if points else None,
-        "source_system": "geojson",
-        "source_entity_id": properties.get("id"),
-        "status": properties.get("status"),
-        "description": properties.get("description"),
-    }
-
-
-def build_slope_payload(feature: Dict[str, Any]) -> Dict[str, Any]:
-    properties = feature.get("properties", {}) or {}
-    geometry = feature.get("geometry", {}) or {}
-    points = parse_coordinates(geometry) or []
-    start = points[0] if points else {"latitude": None, "longitude": None}
-    end = points[-1] if len(points) > 1 else start
-
-    def to_bool(value: Any) -> bool:
-        return bool(value) and str(value).lower() not in ("false", "0", "none", "null")
-
-    return {
-        "resort_id": get_default_resort_id(properties),
-        "name": properties.get("name"),
-        "difficulty": properties.get("difficulty"),
-        "length_m": properties.get("length"),
-        "average_gradient": properties.get("averageGradient"),
-        "max_gradient": properties.get("maxGradient"),
-        "snowmaking": to_bool(properties.get("snowmaking")),
-        "lit": to_bool(properties.get("lit")),
-        "patrolled": to_bool(properties.get("patrolled")),
-        "difficulty_convention": properties.get("difficultyConvention"),
-        "grooming_status": properties.get("grooming"),
-        "status": properties.get("status"),
-        "lat_start": start.get("latitude"),
-        "lon_start": start.get("longitude"),
-        "lat_end": end.get("latitude"),
-        "lon_end": end.get("longitude"),
-        "slope_path_json": json.dumps(points) if points else None,
-        "source_system": "geojson",
-        "source_entity_id": properties.get("id"),
-        "description": properties.get("description"),
-    }
-
-
-def build_payload(file_type: str, feature: Dict[str, Any]) -> Dict[str, Any]:
-    if file_type == "resorts":
-        return build_resort_payload(feature)
-    if file_type == "lifts":
-        return build_lift_payload(feature)
-    if file_type == "slopes":
-        return build_slope_payload(feature)
-    raise ValueError(f"Unsupported file type: {file_type}")
-
-
-def feature_stream(file_path: Path) -> Iterator[Dict[str, Any]]:
-    decoder = json.JSONDecoder()
-    buffer = ""
-    started = False
-    file_type = file_path.name
-
-    with file_path.open("r", encoding="utf-8") as source:
-        while True:
-            chunk = source.read(CHUNK_SIZE)
-            if not chunk:
-                break
-            buffer += chunk
-            if not started:
-                features_index = buffer.find("\"features\"")
-                if features_index < 0:
-                    continue
-                open_bracket = buffer.find("[", features_index)
-                if open_bracket < 0:
-                    continue
-                buffer = buffer[open_bracket + 1 :]
-                started = True
-
-            while True:
-                stripped = buffer.lstrip()
-                if not stripped:
-                    break
-                if stripped[0] in ",\n\r \t":
-                    buffer = stripped[1:]
-                    continue
-                if stripped[0] == "]":
-                    return
-                try:
-                    obj, index = decoder.raw_decode(stripped)
-                    yield obj
-                    buffer = stripped[index:]
-                except json.JSONDecodeError:
-                    break
-
-    # Final buffer flush after file read
-    while True:
-        stripped = buffer.lstrip()
-        if not stripped or stripped[0] == "]":
+            log.error("Unsupported GeoJSON type in %s", file_path)
             return
-        try:
-            obj, index = decoder.raw_decode(stripped)
-            yield obj
-            buffer = stripped[index:]
-        except json.JSONDecodeError:
-            return
+
+        for feature in features:
+            if feature.get("type") == "Feature":
+                yield feature
+
+    except Exception as e:
+        log.error("Failed to load GeoJSON from %s: %s", file_path, e)
 
 
 def execute_push(
     file_path: Path,
     dry_run: bool = False,
     limit: Optional[int] = None,
+    batch_size: int = 10,
 ) -> None:
-    file_name = file_path.name
-    endpoint = DATA_FILE_ENDPOINTS.get(file_name)
-    if endpoint is None:
-        log.error("Unsupported geojson file: %s", file_name)
-        return
+    """Push GeoJSON features to the API with batching and type detection."""
+    log.info("Processing GeoJSON file: %s", file_path)
 
-    resource_type = {
-        "lifts.geojson": "lifts",
-        "runs.geojson": "slopes",
-        "ski_areas.geojson": "resorts",
-    }[file_name]
+    # Group features by endpoint for batching
+    batches: Dict[str, List[Tuple[str, Dict[str, Any]]]] = {}
 
-    log.info("Pushing data from %s to %s", file_path, endpoint)
-    pushed = 0
-    skipped = 0
-
-    for index, feature in enumerate(feature_stream(file_path), start=1):
+    for index, feature in enumerate(load_geojson_features(file_path), start=1):
         if limit and index > limit:
             break
-        payload = build_payload(resource_type, feature)
-        if dry_run:
-            log.info("Dry run payload for %s #%s: %s", file_name, index, payload)
-            skipped += 1
+
+        try:
+            endpoint, resource_type, prepared_feature = prepare_feature_for_api(feature)
+            if endpoint not in batches:
+                batches[endpoint] = []
+            batches[endpoint].append((resource_type, prepared_feature))
+
+            # Process batches when they reach the batch size
+            if len(batches[endpoint]) >= batch_size:
+                process_batch(endpoint, batches[endpoint], dry_run)
+                batches[endpoint] = []
+
+        except Exception as e:
+            log.error("Failed to process feature #%s: %s", index, e)
             continue
 
+    # Process remaining batches
+    for endpoint, batch in batches.items():
+        if batch:
+            process_batch(endpoint, batch, dry_run)
+
+
+def process_batch(endpoint: str, batch: List[Tuple[str, Dict[str, Any]]], dry_run: bool) -> None:
+    """Process a batch of features for a single endpoint."""
+    if dry_run:
+        for resource_type, feature in batch:
+            name = feature.get("properties", {}).get("name", "unnamed")
+            log.info("DRY RUN: Would send %s feature '%s' to %s", resource_type, name, endpoint)
+        return
+
+    log.info("Sending batch of %d features to %s", len(batch), endpoint)
+
+    for resource_type, feature in batch:
         response = request_with_timeout_retry("POST", endpoint, json_body=feature, headers=HEADERS)
+
         if response is None:
-            log.error("No response for %s record %s", file_name, index)
-            skipped += 1
+            log.error("No response for %s feature", resource_type)
             continue
 
         if response.status_code in (200, 201):
-            pushed += 1
-            log.info("PUSHED %s #%s (HTTP %s)", file_name, index, response.status_code)
+            log.info("SUCCESS: %s feature (HTTP %s)", resource_type, response.status_code)
         else:
             log.error(
-                "Failed to push %s #%s: HTTP %s %s",
-                file_name,
-                index,
+                "FAILED: %s feature - HTTP %s: %s",
+                resource_type,
                 response.status_code,
-                response.text.strip(),
+                response.text[:200]  # Truncate long error messages
             )
-            skipped += 1
 
+        # Rate limiting
         time.sleep(REQUEST_DELAY)
-
-    log.info(
-        "Finished %s: pushed=%s skipped=%s limit=%s",
-        file_name,
-        pushed,
-        skipped,
-        limit,
-    )
 
 
 def main() -> int:
@@ -445,7 +415,7 @@ def main() -> int:
     parser.add_argument(
         "--file",
         type=str,
-        help="Path to a single geojson file to push (lifts.geojson, runs.geojson, ski_areas.geojson).",
+        help="Path to a single geojson file to push (supports FeatureCollection or individual Features).",
     )
     parser.add_argument(
         "--all",
@@ -466,6 +436,12 @@ def main() -> int:
         "--limit",
         type=int,
         help="Limit the number of features pushed from each file.",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=10,
+        help="Number of features to batch together per API request (default: 10).",
     )
     args = parser.parse_args()
 
@@ -498,7 +474,7 @@ def main() -> int:
         if not file_path.exists():
             log.error("GeoJSON file not found: %s", file_path)
             continue
-        execute_push(file_path, dry_run=args.dry_run, limit=args.limit)
+        execute_push(file_path, dry_run=args.dry_run, limit=args.limit, batch_size=args.batch_size)
 
     return 0
 

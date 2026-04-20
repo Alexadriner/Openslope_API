@@ -309,40 +309,4 @@ pub struct SkiAreaBlock {
     pub properties: Option<Value>,
 }
 
-/// Individual lift information for API responses
-///
-/// Represents a single lift within a ski resort, including its type and current status.
-/// This information is useful for skiers planning their day on the mountain.
-///
-/// # Lift Types
-/// Common lift types include:
-/// - "Chairlift": Detachable or fixed-grip chairlifts
-/// - "Gondola": Enclosed cabin lifts
-/// - "T-bar": Surface lift with T-shaped bars
-/// - "Surface lift": Magic carpet or similar surface lifts
-///
-/// # Status Values
-/// Status typically indicates whether the lift is operational:
-/// - "Open": Lift is currently operating
-/// - "Closed": Lift is not operating
-/// - "Maintenance": Lift is under maintenance
-///
 
-/// Individual slope information for API responses
-///
-/// Represents a single slope within a ski resort, including its difficulty level
-/// and length. This information helps skiers choose appropriate runs for their
-/// skill level and plan their day on the mountain.
-///
-/// # Difficulty Levels
-/// Standard difficulty classifications:
-/// - "Green": Beginner slopes, gentle gradients
-/// - "Blue": Intermediate slopes, moderate gradients
-/// - "Red": Advanced slopes, steep gradients
-/// - "Black": Expert slopes, very steep and challenging
-///
-/// # Length Measurement
-/// - Length is measured in kilometers
-/// - Represents the total distance from top to bottom of the slope
-/// - May include variations for different route options
-///

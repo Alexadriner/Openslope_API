@@ -375,7 +375,7 @@ where
                 }
             }
 
-            let mut user = match user {
+            let user = match user {
                 Some(u) => u,
                 None => {
                     return Ok(req.into_response(
