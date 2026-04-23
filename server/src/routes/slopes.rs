@@ -11,7 +11,7 @@ use crate::{
     db, dto,
     error::AppError,
     models::db::Place,
-    utils::{parse_feature_id, parse_geometry_to_wkt, parse_places, parse_related_ids},
+    utils::{parse_feature_id, parse_geometry_to_linestring_wkt, parse_places, parse_related_ids},
 };
 
 #[derive(Deserialize)]
@@ -58,7 +58,7 @@ impl SlopePayload {
         .or_else(|| parse_feature_id(&serde_json::json!({ "id": feature.feature_type.clone() })))
         .ok_or_else(|| AppError::BadRequest("Missing feature id".into()))?;
 
-        let geometry = parse_geometry_to_wkt(&feature.geometry)
+        let geometry = parse_geometry_to_linestring_wkt(&feature.geometry)
             .ok_or_else(|| AppError::BadRequest("Invalid GeoJSON geometry".into()))?;
 
         Ok(SlopePayload {

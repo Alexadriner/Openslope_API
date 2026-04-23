@@ -419,19 +419,6 @@ def prepare_feature_for_api(feature: Dict[str, Any]) -> Optional[Tuple[str, str,
         )
         return None
 
-    # Additional validation: slopes should not be Polygons (they should be LineStrings)
-    feature_type = detect_feature_type(properties)
-    geometry_type = geometry.get("type")
-    if feature_type == "slope" and geometry_type in ("Polygon", "MultiPolygon"):
-        feature_id = feature.get("properties", {}).get("id", "unknown")
-        feature_name = feature.get("properties", {}).get("name", "unknown")
-        log.warning(
-            "Skipping slope '%s' (%s): Polygon geometries are not suitable for slopes (should be LineString)",
-            feature_name,
-            feature_id,
-        )
-        return None
-
     # Generate normalized name if needed
     normalized_name = generate_normalized_name(properties, feature_type)
 
