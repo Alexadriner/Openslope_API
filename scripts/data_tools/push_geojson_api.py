@@ -23,9 +23,11 @@ import json
 import logging
 import sys
 import time
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
+import ijson
 import requests
 from requests.adapters import HTTPAdapter
 from requests.exceptions import RequestException, Timeout
@@ -70,6 +72,38 @@ TRANSIENT_ERROR_HINTS = (
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 DATA_DIR = ROOT_DIR / "data" / "geodata"
+CHECKPOINTS_DIR = ROOT_DIR / "checkpoints" / "push_geojson_api"
+
+
+def get_checkpoint_file(file_path: Path) -> Path:
+    """Get the checkpoint file path for a given GeoJSON file."""
+    filename = file_path.stem
+    CHECKPOINTS_DIR.mkdir(parents=True, exist_ok=True)
+    return CHECKPOINTS_DIR / f"{filename}_checkpoint.json"
+
+
+def load_checkpoint(file_path: Path) -> int:
+    """Load the last processed index from checkpoint file."""
+    checkpoint_file = get_checkpoint_file(file_path)
+    if checkpoint_file.exists():
+        try:
+            with open(checkpoint_file, 'r') as f:
+                data = json.load(f)
+                return data.get("last_index", 0)
+        except Exception as e:
+            log.warning("Failed to load checkpoint from %s: %s", checkpoint_file, e)
+    return 0
+
+
+def save_checkpoint(file_path: Path, last_index: int) -> None:
+    """Save the last processed index to checkpoint file."""
+    checkpoint_file = get_checkpoint_file(file_path)
+    try:
+        with open(checkpoint_file, 'w') as f:
+            json.dump({"last_index": last_index}, f)
+        log.info("Checkpoint saved: last_index=%d for %s", last_index, file_path.name)
+    except Exception as e:
+        log.error("Failed to save checkpoint to %s: %s", checkpoint_file, e)
 
 
 def setup_logger() -> logging.Logger:
@@ -84,6 +118,25 @@ def setup_logger() -> logging.Logger:
 
 
 log = setup_logger()
+
+
+def set_log_level(level: int) -> None:
+    """Set the log level for all handlers."""
+    for handler in log.handlers:
+        handler.setLevel(level)
+    log.setLevel(level)
+
+
+def convert_decimals(obj: Any) -> Any:
+    """Recursively convert Decimal objects to floats for JSON serialization."""
+    if isinstance(obj, Decimal):
+        return float(obj)
+    elif isinstance(obj, dict):
+        return {k: convert_decimals(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_decimals(item) for item in obj]
+    else:
+        return obj
 
 
 def create_session() -> requests.Session:
@@ -308,6 +361,36 @@ def generate_normalized_name(properties: Dict[str, Any], feature_type: str) -> s
     return f"{feature_type.capitalize()} {properties.get('id', 'unknown')}"
 
 
+def validate_geometry(geometry: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+    """Validate geometry for invalid values (NaN, Infinity, etc)."""
+    def check_coord(coord: Any) -> Optional[str]:
+        if isinstance(coord, (int, float)):
+            if coord != coord:  # NaN check
+                return "NaN coordinate found"
+            if coord == float('inf') or coord == float('-inf'):
+                return "Infinity coordinate found"
+        return None
+
+    def check_coords_recursive(coords: Any) -> Optional[str]:
+        if isinstance(coords, (list, tuple)):
+            if len(coords) > 0 and isinstance(coords[0], (int, float)):
+                # This is a coordinate pair [lon, lat] or [lon, lat, elevation]
+                for coord in coords:
+                    error = check_coord(coord)
+                    if error:
+                        return error
+            else:
+                # This is a nested structure
+                for item in coords:
+                    error = check_coords_recursive(item)
+                    if error:
+                        return error
+        return None
+
+    coords = geometry.get("coordinates", [])
+    return (True, None) if not check_coords_recursive(coords) else (False, check_coords_recursive(coords))
+
+
 def prepare_feature_for_api(feature: Dict[str, Any]) -> Optional[Tuple[str, str, Dict[str, Any]]]:
     """
     Prepare a GeoJSON feature for API submission.
@@ -323,6 +406,32 @@ def prepare_feature_for_api(feature: Dict[str, Any]) -> Optional[Tuple[str, str,
     ):
         return None  # Invalid geometry, skip this feature
 
+    # Validate geometry values for NaN, Infinity, etc
+    is_valid, error_msg = validate_geometry(geometry)
+    if not is_valid:
+        feature_id = feature.get("properties", {}).get("id", "unknown")
+        feature_name = feature.get("properties", {}).get("name", "unknown")
+        log.error(
+            "Invalid geometry for feature '%s' (%s): %s",
+            feature_name,
+            feature_id,
+            error_msg,
+        )
+        return None
+
+    # Additional validation: slopes should not be Polygons (they should be LineStrings)
+    feature_type = detect_feature_type(properties)
+    geometry_type = geometry.get("type")
+    if feature_type == "slope" and geometry_type in ("Polygon", "MultiPolygon"):
+        feature_id = feature.get("properties", {}).get("id", "unknown")
+        feature_name = feature.get("properties", {}).get("name", "unknown")
+        log.warning(
+            "Skipping slope '%s' (%s): Polygon geometries are not suitable for slopes (should be LineString)",
+            feature_name,
+            feature_id,
+        )
+        return None
+
     # Generate normalized name if needed
     normalized_name = generate_normalized_name(properties, feature_type)
 
@@ -335,6 +444,9 @@ def prepare_feature_for_api(feature: Dict[str, Any]) -> Optional[Tuple[str, str,
     prepared_properties = properties.copy()
     prepared_properties["name"] = normalized_name
     prepared_feature["properties"] = prepared_properties
+
+    # Convert any Decimal objects to floats for JSON serialization
+    prepared_feature = convert_decimals(prepared_feature)
 
     if feature_type == "lift":
         endpoint = IMPORT_LIFTS_ENDPOINT
@@ -413,6 +525,21 @@ def try_upsert_feature(
         log.info("SUCCESS: %s feature (HTTP %s)", resource_type, response.status_code)
         return True, False
 
+    if response.status_code == 400:
+        # Bad request - likely a data validation issue
+        feature_id = extract_feature_id(feature)
+        feature_name = feature.get("properties", {}).get("name", "unknown")
+        log.error(
+            "BAD REQUEST (400) for %s feature '%s' (%s): %s",
+            resource_type,
+            feature_name,
+            feature_id,
+            response.text[:500],
+        )
+        # Log the feature for debugging
+        log.debug("Feature data: %s", json.dumps(feature, indent=2))
+        return False, False
+
     if response.status_code == 409:
         feature_id = extract_feature_id(feature)
         if not feature_id:
@@ -469,6 +596,19 @@ def try_upsert_feature(
         )
         return False, True
 
+    # For 500+ errors, log the full response
+    if response.status_code >= 500:
+        feature_id = extract_feature_id(feature)
+        feature_name = feature.get("properties", {}).get("name", "unknown")
+        log.error(
+            "SERVER ERROR (%s) for %s feature '%s' (%s): %s",
+            response.status_code,
+            resource_type,
+            feature_name,
+            feature_id,
+            response.text[:1000],
+        )
+
     log.error(
         "FAILED: %s feature - HTTP %s: %s",
         resource_type,
@@ -515,22 +655,14 @@ def push_feature_with_recovery(
 
 
 def load_geojson_features(file_path: Path) -> Iterator[Dict[str, Any]]:
-    """Load features from a GeoJSON file (FeatureCollection or Feature)."""
+    """Load features from a GeoJSON file (FeatureCollection or Feature) iteratively."""
     try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-
-        if data.get("type") == "FeatureCollection":
-            features = data.get("features", [])
-        elif data.get("type") == "Feature":
-            features = [data]
-        else:
-            log.error("Unsupported GeoJSON type in %s", file_path)
-            return
-
-        for feature in features:
-            if feature.get("type") == "Feature":
-                yield feature
+        with open(file_path, 'rb') as f:  # ijson needs binary mode
+            # Parse the features array
+            features = ijson.items(f, 'features.item')
+            for feature in features:
+                if feature.get("type") == "Feature":
+                    yield feature
 
     except Exception as e:
         log.error("Failed to load GeoJSON from %s: %s", file_path, e)
@@ -542,21 +674,38 @@ def execute_push(
     limit: Optional[int] = None,
     start_index: int = 1,
     batch_size: int = 10,
+    debug_mode: bool = False,
 ) -> None:
     """Push GeoJSON features to the API with batching and type detection."""
     log.info("Processing GeoJSON file: %s", file_path)
+
+    # Load checkpoint
+    checkpoint_index = load_checkpoint(file_path)
+    if start_index == 1 and checkpoint_index > 0:
+        log.info("Resuming from checkpoint: last processed index %d", checkpoint_index)
+        start_index = checkpoint_index + 1
+
     log.info("Starting at feature index %d", start_index)
 
     # Group features by endpoint for batching
     batches: Dict[str, List[Tuple[str, Dict[str, Any]]]] = {}
     skipped_count = 0
+    processed_count = 0
+    max_features = 10000  # Process only 10000 features per run
+    max_processed_index = start_index - 1
 
     for index, feature in enumerate(load_geojson_features(file_path), start=1):
         if index < start_index:
             continue
 
-        if limit and index > limit:
+        if processed_count >= max_features:
+            log.info("Reached maximum features per run (%d). Stopping.", max_features)
             break
+
+        if limit and processed_count >= limit:
+            break
+
+        max_processed_index = index
 
         try:
             result = prepare_feature_for_api(feature)
@@ -568,14 +717,29 @@ def execute_push(
                 continue
 
             endpoint, resource_type, prepared_feature = result
+            if debug_mode:
+                feature_id = extract_feature_id(prepared_feature)
+                feature_name = prepared_feature.get("properties", {}).get("name", "unknown")
+                geometry_type = prepared_feature.get("geometry", {}).get("type", "unknown")
+                log.debug(
+                    "[#%d] %s feature '%s' (%s) - geometry: %s",
+                    index,
+                    resource_type,
+                    feature_name,
+                    feature_id,
+                    geometry_type,
+                )
             if endpoint not in batches:
                 batches[endpoint] = []
             batches[endpoint].append((resource_type, prepared_feature))
 
             # Process batches when they reach the batch size
             if len(batches[endpoint]) >= batch_size:
-                process_batch(endpoint, batches[endpoint], dry_run)
+                if process_batch(endpoint, batches[endpoint], dry_run):
+                    save_checkpoint(file_path, max_processed_index)
                 batches[endpoint] = []
+
+            processed_count += 1
 
         except Exception as e:
             feature_id = feature.get("properties", {}).get("id", "unknown")
@@ -585,27 +749,32 @@ def execute_push(
     # Process remaining batches
     for endpoint, batch in batches.items():
         if batch:
-            process_batch(endpoint, batch, dry_run)
+            if process_batch(endpoint, batch, dry_run):
+                save_checkpoint(file_path, max_processed_index)
 
     if skipped_count > 0:
         log.info("Skipped %d features due to invalid data", skipped_count)
 
+    log.info("Processed %d features. Next run will start from index %d", processed_count, max_processed_index + 1)
 
-def process_batch(endpoint: str, batch: List[Tuple[str, Dict[str, Any]]], dry_run: bool) -> None:
+
+def process_batch(endpoint: str, batch: List[Tuple[str, Dict[str, Any]]], dry_run: bool) -> bool:
     """Process a batch of features for a single endpoint."""
     if dry_run:
         for resource_type, feature in batch:
             name = feature.get("properties", {}).get("name", "unnamed")
             log.info("DRY RUN: Would send %s feature '%s' to %s", resource_type, name, endpoint)
-        return
+        return True
 
     log.info("Sending batch of %d features to %s", len(batch), endpoint)
 
+    success_count = 0
     for resource_type, feature in batch:
-        push_feature_with_recovery(endpoint, resource_type, feature)
-
-        # Rate limiting
+        if push_feature_with_recovery(endpoint, resource_type, feature):
+            success_count += 1
         time.sleep(REQUEST_DELAY)
+
+    return success_count == len(batch)
 
 
 def main() -> int:
@@ -647,7 +816,16 @@ def main() -> int:
         default=10,
         help="Number of features to batch together per API request (default: 10).",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug mode with detailed feature logging.",
+    )
     args = parser.parse_args()
+
+    if args.debug:
+        set_log_level(logging.DEBUG)
+        log.debug("Debug mode enabled")
 
     if args.index < 1:
         parser.error("--index must be >= 1")
@@ -687,6 +865,7 @@ def main() -> int:
             limit=args.limit,
             start_index=args.index,
             batch_size=args.batch_size,
+            debug_mode=args.debug,
         )
 
     return 0
