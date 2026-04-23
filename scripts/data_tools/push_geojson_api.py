@@ -51,6 +51,22 @@ DEFAULT_RETRY_WAIT = 1
 MAX_RETRY_WAIT = 60
 REQUEST_TIMEOUT = 30
 CHUNK_SIZE = 65536
+MAX_FEATURE_PUSH_ATTEMPTS = 6
+TRANSIENT_STATUS_CODES = {408, 423, 425, 429, 500, 502, 503, 504}
+TRANSIENT_ERROR_HINTS = (
+    "too many connections",
+    "deadlock",
+    "lock wait timeout",
+    "temporarily unavailable",
+    "timeout",
+    "timed out",
+    "connection reset",
+    "connection refused",
+    "try again",
+    "rate limit",
+    "overloaded",
+    "busy",
+)
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 DATA_DIR = ROOT_DIR / "data" / "geodata"
@@ -117,12 +133,16 @@ def request_with_timeout_retry(
             return None
 
         if response.status_code == 408:
+            response_text = response.text[:400].strip()
             log.warning("HTTP 408 from %s %s. Retrying in %ss...", method, url, wait)
+            if response_text:
+                log.warning("Response body from %s %s: %s", method, url, response_text)
             time.sleep(wait)
             wait = min(wait * 2, MAX_RETRY_WAIT)
             continue
 
         if response.status_code in (429, 500, 502, 503, 504):
+            response_text = response.text[:400].strip()
             log.warning(
                 "HTTP %s from %s %s. Retrying in %ss...",
                 response.status_code,
@@ -130,6 +150,8 @@ def request_with_timeout_retry(
                 url,
                 wait,
             )
+            if response_text:
+                log.warning("Response body from %s %s: %s", method, url, response_text)
             time.sleep(wait)
             wait = min(wait * 2, MAX_RETRY_WAIT)
             continue
@@ -286,16 +308,27 @@ def generate_normalized_name(properties: Dict[str, Any], feature_type: str) -> s
     return f"{feature_type.capitalize()} {properties.get('id', 'unknown')}"
 
 
-def prepare_feature_for_api(feature: Dict[str, Any]) -> Tuple[str, str, Dict[str, Any]]:
+def prepare_feature_for_api(feature: Dict[str, Any]) -> Optional[Tuple[str, str, Dict[str, Any]]]:
     """
     Prepare a GeoJSON feature for API submission.
-    Returns (endpoint, resource_type, feature_dict)
+    Returns (endpoint, resource_type, feature_dict) or None if feature is invalid.
     """
     properties = feature.get("properties", {})
     feature_type = detect_feature_type(properties)
 
+    # Validate feature has required geometry
+    geometry = feature.get("geometry")
+    if not geometry or not geometry.get("type") or geometry.get("type") not in (
+        "Point", "LineString", "Polygon", "MultiPoint", "MultiLineString", "MultiPolygon"
+    ):
+        return None  # Invalid geometry, skip this feature
+
     # Generate normalized name if needed
     normalized_name = generate_normalized_name(properties, feature_type)
+
+    # Validate that normalized name is not empty
+    if not normalized_name or not str(normalized_name).strip():
+        return None  # Could not generate valid name, skip this feature
 
     # Create a copy of the feature and update the name
     prepared_feature = feature.copy()
@@ -318,6 +351,167 @@ def prepare_feature_for_api(feature: Dict[str, Any]) -> Tuple[str, str, Dict[str
         resource_type = "resorts"
 
     return endpoint, resource_type, prepared_feature
+
+
+def extract_feature_id(feature: Dict[str, Any]) -> Optional[str]:
+    properties = feature.get("properties", {})
+
+    candidate = properties.get("id", feature.get("id"))
+    if candidate is None:
+        return None
+
+    candidate_str = str(candidate).strip()
+    return candidate_str or None
+
+
+def get_update_endpoint(resource_type: str, feature_id: str) -> str:
+    if resource_type == "resorts":
+        return f"{RESORTS_ENDPOINT}/{feature_id}"
+    if resource_type == "lifts":
+        return f"{LIFTS_ENDPOINT}/{feature_id}"
+    if resource_type == "slopes":
+        return f"{SLOPES_ENDPOINT}/{feature_id}"
+    raise ValueError(f"Unsupported resource type for update: {resource_type}")
+
+
+def get_feature_label(resource_type: str, feature: Dict[str, Any]) -> str:
+    properties = feature.get("properties", {})
+    feature_id = extract_feature_id(feature) or "unknown-id"
+    feature_name = properties.get("name")
+
+    if feature_name:
+        return f"{resource_type} '{feature_name}' ({feature_id})"
+    return f"{resource_type} {feature_id}"
+
+
+def compute_feature_retry_wait(attempt: int) -> int:
+    return min(DEFAULT_RETRY_WAIT * (2 ** max(0, attempt - 1)), MAX_RETRY_WAIT)
+
+
+def response_indicates_transient_failure(response: Optional[requests.Response]) -> bool:
+    if response is None:
+        return True
+
+    if response.status_code in TRANSIENT_STATUS_CODES:
+        return True
+
+    body = response.text.lower()
+    return any(hint in body for hint in TRANSIENT_ERROR_HINTS)
+
+
+def try_upsert_feature(
+    endpoint: str,
+    resource_type: str,
+    feature: Dict[str, Any],
+) -> Tuple[bool, bool]:
+    response = request_with_timeout_retry("POST", endpoint, json_body=feature, headers=HEADERS)
+
+    if response is None:
+        return False, True
+
+    if response.status_code in (200, 201):
+        log.info("SUCCESS: %s feature (HTTP %s)", resource_type, response.status_code)
+        return True, False
+
+    if response.status_code == 409:
+        feature_id = extract_feature_id(feature)
+        if not feature_id:
+            log.error(
+                "FAILED: %s feature conflict, but no feature id was present",
+                resource_type,
+            )
+            return False, False
+
+        update_endpoint = get_update_endpoint(resource_type, feature_id)
+        update_response = request_with_timeout_retry(
+            "PUT",
+            update_endpoint,
+            json_body=feature,
+            headers=HEADERS,
+        )
+
+        if update_response is None:
+            return False, True
+
+        if update_response.status_code in (200, 201):
+            log.info(
+                "UPDATED: %s feature %s after conflict (HTTP %s)",
+                resource_type,
+                feature_id,
+                update_response.status_code,
+            )
+            return True, False
+
+        if response_indicates_transient_failure(update_response):
+            log.warning(
+                "Transient update failure for %s - HTTP %s: %s",
+                get_feature_label(resource_type, feature),
+                update_response.status_code,
+                update_response.text[:200],
+            )
+            return False, True
+
+        log.error(
+            "FAILED UPDATE: %s feature %s - HTTP %s: %s",
+            resource_type,
+            feature_id,
+            update_response.status_code,
+            update_response.text[:200],
+        )
+        return False, False
+
+    if response_indicates_transient_failure(response):
+        log.warning(
+            "Transient push failure for %s - HTTP %s: %s",
+            get_feature_label(resource_type, feature),
+            response.status_code,
+            response.text[:200],
+        )
+        return False, True
+
+    log.error(
+        "FAILED: %s feature - HTTP %s: %s",
+        resource_type,
+        response.status_code,
+        response.text[:200],
+    )
+    return False, False
+
+
+def push_feature_with_recovery(
+    endpoint: str,
+    resource_type: str,
+    feature: Dict[str, Any],
+) -> bool:
+    feature_label = get_feature_label(resource_type, feature)
+
+    for attempt in range(1, MAX_FEATURE_PUSH_ATTEMPTS + 1):
+        success, should_retry = try_upsert_feature(endpoint, resource_type, feature)
+        if success:
+            return True
+
+        if not should_retry:
+            return False
+
+        if attempt == MAX_FEATURE_PUSH_ATTEMPTS:
+            break
+
+        wait = compute_feature_retry_wait(attempt)
+        log.warning(
+            "Retrying %s in %ss (attempt %s/%s)...",
+            feature_label,
+            wait,
+            attempt + 1,
+            MAX_FEATURE_PUSH_ATTEMPTS,
+        )
+        time.sleep(wait)
+
+    log.error(
+        "Gave up on %s after %s attempts.",
+        feature_label,
+        MAX_FEATURE_PUSH_ATTEMPTS,
+    )
+    return False
 
 
 def load_geojson_features(file_path: Path) -> Iterator[Dict[str, Any]]:
@@ -346,20 +540,34 @@ def execute_push(
     file_path: Path,
     dry_run: bool = False,
     limit: Optional[int] = None,
+    start_index: int = 1,
     batch_size: int = 10,
 ) -> None:
     """Push GeoJSON features to the API with batching and type detection."""
     log.info("Processing GeoJSON file: %s", file_path)
+    log.info("Starting at feature index %d", start_index)
 
     # Group features by endpoint for batching
     batches: Dict[str, List[Tuple[str, Dict[str, Any]]]] = {}
+    skipped_count = 0
 
     for index, feature in enumerate(load_geojson_features(file_path), start=1):
+        if index < start_index:
+            continue
+
         if limit and index > limit:
             break
 
         try:
-            endpoint, resource_type, prepared_feature = prepare_feature_for_api(feature)
+            result = prepare_feature_for_api(feature)
+            if result is None:
+                # Feature is invalid or cannot be prepared, skip it
+                feature_id = feature.get("properties", {}).get("id", "unknown")
+                log.debug("Skipped invalid feature #%s (%s)", index, feature_id)
+                skipped_count += 1
+                continue
+
+            endpoint, resource_type, prepared_feature = result
             if endpoint not in batches:
                 batches[endpoint] = []
             batches[endpoint].append((resource_type, prepared_feature))
@@ -370,13 +578,17 @@ def execute_push(
                 batches[endpoint] = []
 
         except Exception as e:
-            log.error("Failed to process feature #%s: %s", index, e)
+            feature_id = feature.get("properties", {}).get("id", "unknown")
+            log.error("Failed to process feature #%s (%s): %s", index, feature_id, e)
             continue
 
     # Process remaining batches
     for endpoint, batch in batches.items():
         if batch:
             process_batch(endpoint, batch, dry_run)
+
+    if skipped_count > 0:
+        log.info("Skipped %d features due to invalid data", skipped_count)
 
 
 def process_batch(endpoint: str, batch: List[Tuple[str, Dict[str, Any]]], dry_run: bool) -> None:
@@ -390,21 +602,7 @@ def process_batch(endpoint: str, batch: List[Tuple[str, Dict[str, Any]]], dry_ru
     log.info("Sending batch of %d features to %s", len(batch), endpoint)
 
     for resource_type, feature in batch:
-        response = request_with_timeout_retry("POST", endpoint, json_body=feature, headers=HEADERS)
-
-        if response is None:
-            log.error("No response for %s feature", resource_type)
-            continue
-
-        if response.status_code in (200, 201):
-            log.info("SUCCESS: %s feature (HTTP %s)", resource_type, response.status_code)
-        else:
-            log.error(
-                "FAILED: %s feature - HTTP %s: %s",
-                resource_type,
-                response.status_code,
-                response.text[:200]  # Truncate long error messages
-            )
+        push_feature_with_recovery(endpoint, resource_type, feature)
 
         # Rate limiting
         time.sleep(REQUEST_DELAY)
@@ -438,12 +636,21 @@ def main() -> int:
         help="Limit the number of features pushed from each file.",
     )
     parser.add_argument(
+        "--index",
+        type=int,
+        default=1,
+        help="Start processing at this 1-based feature index (default: 1).",
+    )
+    parser.add_argument(
         "--batch-size",
         type=int,
         default=10,
         help="Number of features to batch together per API request (default: 10).",
     )
     args = parser.parse_args()
+
+    if args.index < 1:
+        parser.error("--index must be >= 1")
 
     if args.validate:
         if not validate_api():
@@ -474,7 +681,13 @@ def main() -> int:
         if not file_path.exists():
             log.error("GeoJSON file not found: %s", file_path)
             continue
-        execute_push(file_path, dry_run=args.dry_run, limit=args.limit, batch_size=args.batch_size)
+        execute_push(
+            file_path,
+            dry_run=args.dry_run,
+            limit=args.limit,
+            start_index=args.index,
+            batch_size=args.batch_size,
+        )
 
     return 0
 

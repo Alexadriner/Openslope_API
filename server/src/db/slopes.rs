@@ -251,7 +251,7 @@ pub async fn insert(
         INSERT INTO slopes
             (id, name, difficulty, status, grooming, geometry, websites, sources)
         VALUES
-            (?, ?, ?, ?, ?, ST_GeomFromText(?, 4326), ?, ?)
+            (?, ?, ?, ?, ?, ST_GeomFromText(?, 4326, 'axis-order=long-lat'), ?, ?)
         "#,
     )
     .bind(id)
@@ -290,7 +290,7 @@ pub async fn update(
             difficulty = ?,
             status = ?,
             grooming = ?,
-            geometry = ST_GeomFromText(?, 4326),
+            geometry = ST_GeomFromText(?, 4326, 'axis-order=long-lat'),
             websites = ?,
             sources = ?
         WHERE id = ?

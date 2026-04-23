@@ -81,10 +81,11 @@ pub fn parse_geometry_to_wkt(geometry: &Value) -> Option<String> {
             let rings = rings
                 .into_iter()
                 .map(|line| {
-                    line.into_iter()
+                    let points = line.into_iter()
                         .map(|(x, y)| format!("{} {}", x, y))
                         .collect::<Vec<_>>()
-                        .join(", ")
+                        .join(", ");
+                    format!("({})", points)
                 })
                 .collect::<Vec<_>>()
                 .join(", ");

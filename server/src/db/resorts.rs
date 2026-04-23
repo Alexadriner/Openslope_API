@@ -95,7 +95,7 @@ pub async fn insert(
         INSERT INTO resorts
             (id, name, `type`, status, activities, geometry, websites, sources)
         VALUES
-            (?, ?, ?, ?, ?, ST_GeomFromText(?, 4326), ?, ?)
+            (?, ?, ?, ?, ?, ST_GeomFromText(?, 4326, 'axis-order=long-lat'), ?, ?)
         "#,
     )
     .bind(id)
@@ -132,7 +132,7 @@ pub async fn update(
             `type` = ?,
             status = ?,
             activities = ?,
-            geometry = ST_GeomFromText(?, 4326),
+            geometry = ST_GeomFromText(?, 4326, 'axis-order=long-lat'),
             websites = ?,
             sources = ?
         WHERE id = ?

@@ -258,7 +258,7 @@ pub async fn insert(
         INSERT INTO lifts
             (id, name, `type`, status, capacity, duration, geometry, websites, sources)
         VALUES
-            (?, ?, ?, ?, ?, ?, ST_GeomFromText(?, 4326), ?, ?)
+            (?, ?, ?, ?, ?, ?, ST_GeomFromText(?, 4326, 'axis-order=long-lat'), ?, ?)
         "#,
     )
     .bind(id)
@@ -300,7 +300,7 @@ pub async fn update(
             status = ?,
             capacity = ?,
             duration = ?,
-            geometry = ST_GeomFromText(?, 4326),
+            geometry = ST_GeomFromText(?, 4326, 'axis-order=long-lat'),
             websites = ?,
             sources = ?
         WHERE id = ?

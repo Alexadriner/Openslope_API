@@ -19,7 +19,7 @@ function formatSnow(value) {
 }
 
 function formatDuration(value) {
-  return value == null ? "No data" : `${value} min`;
+  return value == null ? "No data" : `${value} s`;
 }
 
 function formatCapacity(value) {
