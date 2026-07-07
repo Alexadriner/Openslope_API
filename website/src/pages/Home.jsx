@@ -1,49 +1,73 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import SearchInputWithSuggestions from "../components/SearchInputWithSuggestions";
-import { fetchResorts } from "../api/client";
+import { apiFetch, fetchResortCount, fetchSlopeCount, fetchLiftCount } from "../api/client";
 import { getLocationLabel, getOpenMetric, getResortStats } from "../utils/resortData";
 
 import "../stylesheets/base.css";
 import "../stylesheets/home.css";
 
 export default function Home() {
-  const [resorts, setResorts] = useState([]);
+  const [stats, setStats] = useState({ resorts: 0, lifts: 0, slopes: 0 });
+  const [featuredResorts, setFeaturedResorts] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
 
-    fetchResorts(null, { cacheTTL: 60_000 })
-      .then((data) => {
+    async function loadHomeData() {
+      try {
+        setLoading(true);
+
+        // Load statistics (light requests)
+        const [resortCountData, slopeCountData, liftCountData] = await Promise.all([
+          fetchResortCount({ cacheTTL: 60_000 }),
+          fetchSlopeCount({ cacheTTL: 60_000 }),
+          fetchLiftCount({ cacheTTL: 60_000 })
+        ]);
+
         if (!cancelled) {
-          setResorts(Array.isArray(data) ? data : []);
+          setStats({
+            resorts: Number(resortCountData?.count ?? 0),
+            lifts: Number(liftCountData?.count ?? 0),
+            slopes: Number(slopeCountData?.count ?? 0)
+          });
+
+          // Load only top featured resorts (limit to 3 with pagination)
+          const featuredData = await apiFetch("/resorts?limit=100&offset=0", {
+            cacheTTL: 60_000
+          });
+          
+          if (!cancelled && Array.isArray(featuredData)) {
+            const featured = [...featuredData]
+              .sort((left, right) => {
+                const leftStats = getResortStats(left);
+                const rightStats = getResortStats(right);
+                return (rightStats.openSlopeCount ?? -1) - (leftStats.openSlopeCount ?? -1);
+              })
+              .slice(0, 3);
+            setFeaturedResorts(featured);
+          }
         }
-      })
-      .catch((error) => console.error(error));
+      } catch (error) {
+        console.error("Error loading home data:", error);
+        if (!cancelled) {
+          setStats({ resorts: 0, lifts: 0, slopes: 0 });
+          setFeaturedResorts([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    loadHomeData();
 
     return () => {
       cancelled = true;
     };
   }, []);
-
-  const featuredResorts = [...resorts]
-    .sort((left, right) => {
-      const leftStats = getResortStats(left);
-      const rightStats = getResortStats(right);
-      return (rightStats.openSlopeCount ?? -1) - (leftStats.openSlopeCount ?? -1);
-    })
-    .slice(0, 3);
-
-  const totals = resorts.reduce(
-    (accumulator, resort) => {
-      const stats = getResortStats(resort);
-      accumulator.resorts += 1;
-      accumulator.lifts += stats.liftCount;
-      accumulator.slopes += stats.slopeCount;
-      return accumulator;
-    },
-    { resorts: 0, lifts: 0, slopes: 0 }
-  );
 
   return (
     <div className="home-page">
@@ -67,15 +91,15 @@ export default function Home() {
           <div className="hero-stat-grid">
             <div>
               <span>Resorts</span>
-              <strong>{totals.resorts}</strong>
+              <strong>{stats.resorts}</strong>
             </div>
             <div>
               <span>Slopes</span>
-              <strong>{totals.slopes}</strong>
+              <strong>{stats.slopes}</strong>
             </div>
             <div>
               <span>Lifts</span>
-              <strong>{totals.lifts}</strong>
+              <strong>{stats.lifts}</strong>
             </div>
           </div>
           <p>
@@ -85,26 +109,28 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="featured-section">
-        <div className="section-heading">
-          <p className="eyebrow">Featured right now</p>
-          <h2>Resorts with the strongest live slope signal</h2>
-        </div>
+      {!loading && featuredResorts.length > 0 && (
+        <section className="featured-section">
+          <div className="section-heading">
+            <p className="eyebrow">Featured right now</p>
+            <h2>Resorts with the strongest live slope signal</h2>
+          </div>
 
-        <div className="featured-grid">
-          {featuredResorts.map((resort) => {
-            const stats = getResortStats(resort);
-            return (
-              <Link key={resort.id} to={`/resorts/${resort.id}`} className="featured-card">
-                <p className="featured-location">{getLocationLabel(resort)}</p>
-                <h3>{resort.name}</h3>
-                <p>{getOpenMetric(stats.openSlopeCount, stats.totalSlopeCount, stats.slopeCount)}</p>
-                <p>{getOpenMetric(stats.openLiftCount, stats.totalLiftCount, stats.liftCount)}</p>
-              </Link>
-            );
-          })}
-        </div>
-      </section>
+          <div className="featured-grid">
+            {featuredResorts.map((resort) => {
+              const stats = getResortStats(resort);
+              return (
+                <Link key={resort.id} to={`/resorts/${resort.id}`} className="featured-card">
+                  <p className="featured-location">{getLocationLabel(resort)}</p>
+                  <h3>{resort.name}</h3>
+                  <p>{getOpenMetric(stats.openSlopeCount, stats.totalSlopeCount, stats.slopeCount)}</p>
+                  <p>{getOpenMetric(stats.openLiftCount, stats.totalLiftCount, stats.liftCount)}</p>
+                </Link>
+              );
+            })}
+          </div>
+        </section>
+      )}
     </div>
   );
 }

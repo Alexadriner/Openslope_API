@@ -116,6 +116,11 @@ pub async fn get_slopes(db: web::Data<sqlx::MySqlPool>) -> Result<impl Responder
     Ok(HttpResponse::Ok().json(slopes.into_iter().map(map_slope_row).collect::<Vec<_>>()))
 }
 
+pub async fn get_slope_count(db: web::Data<sqlx::MySqlPool>) -> Result<impl Responder, AppError> {
+    let count = db::slopes::count(db.get_ref()).await?;
+    Ok(HttpResponse::Ok().json(serde_json::json!({ "count": count })))
+}
+
 pub async fn get_slope(
     db: web::Data<sqlx::MySqlPool>,
     id: web::Path<String>,

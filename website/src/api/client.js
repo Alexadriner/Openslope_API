@@ -145,19 +145,54 @@ export async function fetchResorts(transformation = null, options = {}) {
   });
 }
 
+export async function fetchResortCount(options = {}) {
+  return apiFetch("/resorts/count", options);
+}
+
 /**
- * Fetch resorts specifically for map rendering
+ * Fetch resorts specifically for map rendering with pagination
  * 
  * This function fetches resort data optimized for map display,
  * including only the necessary fields for rendering markers and popups.
+ * Supports pagination to avoid loading all resorts at once.
  * 
+ * @param {number} [limit=50] - Number of resorts to fetch
+ * @param {number} [offset=0] - Offset for pagination
  * @param {Object} [options] - Request options
  * @returns {Promise} - Resorts data optimized for map
  */
-export async function fetchResortsForMap(options = {}) {
-  return apiFetch("/resorts", {
+export async function fetchResortsForMap(limit = 50, offset = 0, options = {}) {
+  const isOldUsage = typeof limit === 'object' && limit !== null && offset === 0;
+  
+  if (isOldUsage) {
+    // Backward compatibility: if called with old API (options only)
+    return apiFetch("/resorts", {
+      ...limit,
+      specializedTransformation: "resorts_for_map"
+    });
+  }
+
+  return apiFetch(`/resorts?limit=${limit}&offset=${offset}`, {
     ...options,
     specializedTransformation: "resorts_for_map"
+  });
+}
+
+/**
+ * Fetch only resort markers (minimal data) for map
+ * 
+ * Returns only coordinates and basic info for markers,
+ * without geometry data for lifts/slopes.
+ * 
+ * @param {number} [limit=50] - Number of resorts to fetch
+ * @param {number} [offset=0] - Offset for pagination
+ * @param {Object} [options] - Request options
+ * @returns {Promise} - Minimal resort data for markers
+ */
+export async function fetchResortMarkersForMap(limit = 50, offset = 0, options = {}) {
+  return apiFetch(`/resorts?limit=${limit}&offset=${offset}`, {
+    ...options,
+    specializedTransformation: "resort_markers_only"
   });
 }
 
@@ -173,6 +208,10 @@ export async function fetchSlopes(transformation = null, options = {}) {
     ...options,
     transformation
   });
+}
+
+export async function fetchSlopeCount(options = {}) {
+  return apiFetch("/slopes/count", options);
 }
 
 /**
@@ -205,6 +244,10 @@ export async function fetchLifts(transformation = null, options = {}) {
   });
 }
 
+export async function fetchLiftCount(options = {}) {
+  return apiFetch("/lifts/count", options);
+}
+
 /**
  * Fetch lifts specifically for map rendering
  * 
@@ -230,6 +273,34 @@ export async function fetchLiftsForMap(options = {}) {
  */
 export async function fetchResort(id, options = {}) {
   return apiFetch(`/resorts/${id}`, options);
+}
+
+/**
+ * Fetch lifts for a specific resort
+ * 
+ * @param {string|number} resortId - Resort ID
+ * @param {Object} [options] - Request options
+ * @returns {Promise} - Lifts data for the resort
+ */
+export async function fetchLiftsForResort(resortId, options = {}) {
+  return apiFetch(`/lifts/by_resort/${resortId}`, {
+    ...options,
+    specializedTransformation: "lifts_for_map"
+  });
+}
+
+/**
+ * Fetch slopes for a specific resort
+ * 
+ * @param {string|number} resortId - Resort ID
+ * @param {Object} [options] - Request options
+ * @returns {Promise} - Slopes data for the resort
+ */
+export async function fetchSlopesForResort(resortId, options = {}) {
+  return apiFetch(`/slopes/by_resort/${resortId}`, {
+    ...options,
+    specializedTransformation: "slopes_for_map"
+  });
 }
 
 /**

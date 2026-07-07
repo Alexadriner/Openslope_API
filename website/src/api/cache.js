@@ -67,12 +67,13 @@ class ApiCache {
    * @returns {string} - Cache key
    */
   generateKey(url, options = {}) {
-    const { method = 'GET', apiKey, transformation } = options;
+    const { method = 'GET', apiKey, transformation, specializedTransformation } = options;
     const keyData = {
       url,
       method: method.toUpperCase(),
       apiKey: apiKey || null,
-      transformation: transformation || null
+      transformation: transformation || null,
+      specializedTransformation: specializedTransformation || null
     };
     
     return CACHE_CONFIG.KEY_PREFIX + JSON.stringify(keyData);

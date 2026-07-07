@@ -19,7 +19,9 @@ export default function ResortPage() {
         setError("");
         setResort(null);
 
-        const resortsData = await apiFetch("/resorts?summary=true");
+        // Load first batch of resorts to find by name
+        // This is necessary since the route uses resort name, not ID
+        const resortsData = await apiFetch("/resorts?limit=500&offset=0");
         const targetName = normalizeResortName(safeDecode(name));
         const foundResort = resortsData.find((entry) => normalizeResortName(entry.name) === targetName);
 

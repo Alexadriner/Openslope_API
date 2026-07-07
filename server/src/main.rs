@@ -151,12 +151,14 @@ async fn main() -> std::io::Result<()> {
                     .wrap(ApiKeyAuth { pool: pool.clone() })
                     // Resorts endpoints
                     .route("/resorts", web::get().to(get_resorts))
+                    .route("/resorts/count", web::get().to(get_resort_count))
                     .route("/resorts/{id}", web::get().to(get_resort))
                     .route("/resorts", web::post().to(create_resort))
                     .route("/resorts/{id}", web::put().to(update_resort))
                     .route("/resorts/{id}", web::delete().to(delete_resort))
                     // Slopes endpoints
                     .route("/slopes", web::get().to(get_slopes))
+                    .route("/slopes/count", web::get().to(get_slope_count))
                     .route("/slopes/{id}", web::get().to(get_slope))
                     .route("/slopes", web::post().to(create_slope))
                     .route("/slopes/{id}", web::put().to(update_slope))
@@ -171,6 +173,7 @@ async fn main() -> std::io::Result<()> {
                     )
                     // Lifts endpoints
                     .route("/lifts", web::get().to(get_lifts))
+                    .route("/lifts/count", web::get().to(get_lift_count))
                     .route("/lifts/{id}", web::get().to(get_lift))
                     .route("/lifts", web::post().to(create_lift))
                     .route("/lifts/{id}", web::put().to(update_lift))

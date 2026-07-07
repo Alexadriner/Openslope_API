@@ -10,23 +10,37 @@ import { faMagnifyingGlass } from "@fortawesome/free-solid-svg-icons";
 export default function SearchInputWithSuggestions({ placeholder }) {
   const [query, setQuery] = useState("");
   const [allResorts, setAllResorts] = useState([]);
+  const [hasLoadedResorts, setHasLoadedResorts] = useState(false);
   const navigate = useNavigate();
 
+  // Only load resorts when user starts typing or when suggestions are about to be shown
   useEffect(() => {
+    if (!query.trim() || hasLoadedResorts) {
+      return;
+    }
+
     let cancelled = false;
 
-    apiFetch("/resorts?summary=true")
-      .then((data) => {
+    async function loadResorts() {
+      try {
+        // Use paginated API to avoid loading all resorts at once
+        // Load first batch of resorts for suggestions
+        const data = await apiFetch("/resorts?limit=500&offset=0");
         if (!cancelled) {
           setAllResorts(Array.isArray(data) ? data : []);
+          setHasLoadedResorts(true);
         }
-      })
-      .catch((err) => console.error(err));
+      } catch (err) {
+        console.error("Error loading resorts for search:", err);
+      }
+    }
+
+    loadResorts();
 
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [query, hasLoadedResorts]);
 
   const suggestions = useMemo(() => {
     if (!query.trim()) {

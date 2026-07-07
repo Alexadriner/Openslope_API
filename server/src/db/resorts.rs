@@ -2,6 +2,8 @@ use crate::models::db::{Place, ResortRow};
 use serde_json::Value;
 use sqlx::MySqlPool;
 
+pub const MAX_RESORT_LIMIT: usize = 20;
+
 #[derive(sqlx::FromRow)]
 struct RawResortRow {
     id: String,
@@ -15,7 +17,28 @@ struct RawResortRow {
     sources: Option<Value>,
 }
 
-pub async fn get_all(pool: &MySqlPool) -> Result<Vec<ResortRow>, sqlx::Error> {
+pub async fn get_limited(
+    pool: &MySqlPool,
+    offset: usize,
+    requested_limit: usize,
+) -> Result<Vec<ResortRow>, sqlx::Error> {
+    get_paginated(pool, offset, requested_limit).await
+}
+
+pub async fn get_paginated(
+    pool: &MySqlPool,
+    offset: usize,
+    requested_limit: usize,
+) -> Result<Vec<ResortRow>, sqlx::Error> {
+    let (effective_limit, exceeded_limit) = resolve_limit(requested_limit);
+
+    if exceeded_limit {
+        eprintln!(
+            "Warning: requested resort limit {} exceeds the maximum of {}. Returning {} resorts instead.",
+            requested_limit, MAX_RESORT_LIMIT, effective_limit
+        );
+    }
+
     let raw_resorts = sqlx::query_as::<_, RawResortRow>(
         r#"
         SELECT
@@ -29,8 +52,11 @@ pub async fn get_all(pool: &MySqlPool) -> Result<Vec<ResortRow>, sqlx::Error> {
             sources
         FROM resorts
         ORDER BY name
+        LIMIT ? OFFSET ?
         "#,
     )
+    .bind(effective_limit as i64)
+    .bind(offset as i64)
     .fetch_all(pool)
     .await?;
 
@@ -40,6 +66,42 @@ pub async fn get_all(pool: &MySqlPool) -> Result<Vec<ResortRow>, sqlx::Error> {
         .collect::<Vec<_>>();
     populate_resort_places(pool, &mut resorts).await?;
     Ok(resorts)
+}
+
+pub async fn count(pool: &MySqlPool) -> Result<i64, sqlx::Error> {
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM resorts")
+        .fetch_one(pool)
+        .await?;
+    Ok(count)
+}
+
+fn resolve_limit(requested_limit: usize) -> (usize, bool) {
+    if requested_limit > MAX_RESORT_LIMIT {
+        (MAX_RESORT_LIMIT, true)
+    } else {
+        (requested_limit, false)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MAX_RESORT_LIMIT, resolve_limit};
+
+    #[test]
+    fn resolves_requested_limit_when_within_maximum() {
+        let (limit, exceeded) = resolve_limit(5);
+
+        assert_eq!(limit, 5);
+        assert!(!exceeded);
+    }
+
+    #[test]
+    fn caps_requested_limit_when_it_exceeds_maximum() {
+        let (limit, exceeded) = resolve_limit(MAX_RESORT_LIMIT + 3);
+
+        assert_eq!(limit, MAX_RESORT_LIMIT);
+        assert!(exceeded);
+    }
 }
 
 pub async fn get_by_id(

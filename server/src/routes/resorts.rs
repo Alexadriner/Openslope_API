@@ -242,7 +242,7 @@ pub async fn get_resorts(
     db: web::Data<sqlx::MySqlPool>,
     query: web::Query<std::collections::HashMap<String, String>>,
 ) -> Result<impl Responder, AppError> {
-    if query
+    let summary = query
         .get("summary")
         .map(|value| {
             matches!(
@@ -250,9 +250,18 @@ pub async fn get_resorts(
                 "1" | "true" | "yes" | "on"
             )
         })
-        .unwrap_or(false)
-    {
-        let resorts = db::resorts::get_all(db.get_ref()).await?;
+        .unwrap_or(false);
+    let limit = query
+        .get("limit")
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(db::resorts::MAX_RESORT_LIMIT);
+    let offset = query
+        .get("offset")
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(0);
+
+    if summary {
+        let resorts = db::resorts::get_paginated(db.get_ref(), offset, limit).await?;
         let summaries: Vec<ResortSummary> = resorts
             .into_iter()
             .map(|resort| ResortSummary {
@@ -264,7 +273,7 @@ pub async fn get_resorts(
         return Ok(HttpResponse::Ok().json(summaries));
     }
 
-    let resorts = db::resorts::get_all(db.get_ref()).await?;
+    let resorts = db::resorts::get_paginated(db.get_ref(), offset, limit).await?;
     let lifts = db::lifts::get_all(db.get_ref()).await?;
     let slopes = db::slopes::get_all(db.get_ref()).await?;
     let resort_ids = resorts
@@ -305,6 +314,11 @@ pub async fn get_resorts(
         .collect();
 
     Ok(HttpResponse::Ok().json(response))
+}
+
+pub async fn get_resort_count(db: web::Data<sqlx::MySqlPool>) -> Result<impl Responder, AppError> {
+    let count = db::resorts::count(db.get_ref()).await?;
+    Ok(HttpResponse::Ok().json(serde_json::json!({ "count": count })))
 }
 
 pub async fn get_resort(

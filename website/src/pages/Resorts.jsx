@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { fetchResorts } from "../api/client";
+import { apiFetch, fetchResortCount } from "../api/client";
 import {
   formatStatusLabel,
   getActivities,
@@ -15,18 +15,41 @@ export default function Resorts() {
   const [resorts, setResorts] = useState([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
+  const [hasMore, setHasMore] = useState(true);
+  const [totalCount, setTotalCount] = useState(0);
+  const [offset, setOffset] = useState(0);
+  const sentinelRef = useRef(null);
+  const offsetRef = useRef(0);
+  const totalCountRef = useRef(0);
+  const hasMoreRef = useRef(true);
+  const loadingMoreRef = useRef(false);
+
+  const PAGE_SIZE = 20;
 
   useEffect(() => {
     let cancelled = false;
 
-    async function loadResorts() {
+    async function loadInitialResorts() {
       try {
         setLoading(true);
         setError("");
-        const data = await fetchResorts();
+        const [data, countResponse] = await Promise.all([
+          apiFetch(`/resorts?limit=${PAGE_SIZE}&offset=0`),
+          fetchResortCount(),
+        ]);
+
         if (!cancelled) {
           setResorts(Array.isArray(data) ? data : []);
+          const initialCount = Array.isArray(data) ? data.length : 0;
+          const total = Number(countResponse?.count ?? 0);
+          setOffset(initialCount);
+          offsetRef.current = initialCount;
+          setHasMore(initialCount < total);
+          hasMoreRef.current = initialCount < total;
+          setTotalCount(total);
+          totalCountRef.current = total;
         }
       } catch (err) {
         if (!cancelled) {
@@ -39,12 +62,62 @@ export default function Resorts() {
       }
     }
 
-    loadResorts();
+    loadInitialResorts();
 
     return () => {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!sentinelRef.current || !hasMore || loading || loadingMore) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          loadMoreResorts();
+        }
+      },
+      { rootMargin: "300px 0px" }
+    );
+
+    observer.observe(sentinelRef.current);
+
+    return () => observer.disconnect();
+  }, [hasMore, loading, loadingMore]);
+
+  async function loadMoreResorts() {
+    if (loadingMoreRef.current || !hasMoreRef.current) {
+      return;
+    }
+
+    try {
+      loadingMoreRef.current = true;
+      setLoadingMore(true);
+      const data = await apiFetch(`/resorts?limit=${PAGE_SIZE}&offset=${offsetRef.current}`);
+      const nextResorts = Array.isArray(data) ? data : [];
+      if (!nextResorts.length) {
+        setHasMore(false);
+        hasMoreRef.current = false;
+        return;
+      }
+
+      setResorts((current) => [...current, ...nextResorts]);
+      const nextOffset = offsetRef.current + nextResorts.length;
+      setOffset(nextOffset);
+      offsetRef.current = nextOffset;
+      const shouldHaveMore = nextOffset < totalCountRef.current;
+      setHasMore(shouldHaveMore);
+      hasMoreRef.current = shouldHaveMore;
+    } catch (err) {
+      setError(err.message || "Failed to load more resorts");
+    } finally {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+    }
+  }
 
   const visibleResorts = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -76,7 +149,11 @@ export default function Resorts() {
         <div>
           <p className="eyebrow">Resort discovery</p>
           <h1>Ski resorts ready for a consumer-friendly overview</h1>
-          <p>{visibleResorts.length} resorts match your search.</p>
+          <p>
+            {query.trim()
+              ? `${visibleResorts.length} resorts match your search.`
+              : `Showing ${Math.min(resorts.length, totalCount)} of ${totalCount} resorts.`}
+          </p>
         </div>
 
         <label className="resorts-filter">
@@ -124,6 +201,12 @@ export default function Resorts() {
           );
         })}
       </section>
+
+      {hasMore ? (
+        <div ref={sentinelRef} className="resorts-load-more" aria-hidden="true">
+          {loadingMore ? "Loading more resorts…" : "Scroll to load more"}
+        </div>
+      ) : null}
     </div>
   );
 }

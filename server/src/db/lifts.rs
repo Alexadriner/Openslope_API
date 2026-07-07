@@ -8,6 +8,13 @@ pub struct LiftWithResorts {
     pub resorts: Vec<ResortRow>,
 }
 
+pub async fn count(pool: &MySqlPool) -> Result<i64, sqlx::Error> {
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM lifts")
+        .fetch_one(pool)
+        .await?;
+    Ok(count)
+}
+
 pub async fn get_all(pool: &MySqlPool) -> Result<Vec<LiftWithResorts>, sqlx::Error> {
     let rows = sqlx::query!(
         r#"

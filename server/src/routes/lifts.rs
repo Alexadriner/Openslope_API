@@ -129,6 +129,11 @@ pub async fn get_lifts(db: web::Data<sqlx::MySqlPool>) -> Result<impl Responder,
     Ok(HttpResponse::Ok().json(lifts.into_iter().map(map_lift_row).collect::<Vec<_>>()))
 }
 
+pub async fn get_lift_count(db: web::Data<sqlx::MySqlPool>) -> Result<impl Responder, AppError> {
+    let count = db::lifts::count(db.get_ref()).await?;
+    Ok(HttpResponse::Ok().json(serde_json::json!({ "count": count })))
+}
+
 pub async fn get_lift(
     db: web::Data<sqlx::MySqlPool>,
     id: web::Path<String>,

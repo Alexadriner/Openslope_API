@@ -4,7 +4,7 @@ import "leaflet/dist/leaflet.css";
 import "leaflet.markercluster";
 import "leaflet.markercluster/dist/MarkerCluster.css";
 import "leaflet.markercluster/dist/MarkerCluster.Default.css";
-import { fetchResortsForMap } from "../api/client";
+import { fetchResortsForMap, fetchLiftsForResort, fetchSlopesForResort } from "../api/client";
 import { formatStatusLabel, getLocationLabel, getResortStats } from "../utils/resortData";
 import "../stylesheets/base.css";
 import "../stylesheets/map.css";
@@ -13,6 +13,7 @@ const DEFAULT_CENTER = [46.8, 8.2];
 const DEFAULT_ZOOM = 5;
 const LIFTS_MIN_ZOOM = 10;
 const SLOPES_MIN_ZOOM = 11;
+const PAGE_SIZE = 50;
 
 const RESORT_MARKER_ICON = L.divIcon({
   className: "single-resort-marker-icon",
@@ -24,10 +25,56 @@ const RESORT_MARKER_ICON = L.divIcon({
 
 function getSlopeColor(difficulty) {
   const key = String(difficulty ?? "").toLowerCase().trim();
-  if (key === "green") return "#30a46c";
-  if (key === "blue") return "#2075c7";
-  if (key === "red") return "#c43d36";
-  if (key === "black") return "#1f2933";
+
+  if (
+    [
+      "easy",
+      "beginner",
+      "novice",
+      "blue",
+      "blue_square",
+      "blue square",
+    ].includes(key)
+  ) {
+    return "#2075c7";
+  }
+
+  if (
+    [
+      "intermediate",
+      "moderate",
+      "red",
+      "red_run",
+      "red run",
+    ].includes(key)
+  ) {
+    return "#c43d36";
+  }
+
+  if (
+    [
+      "advanced",
+      "difficult",
+      "very_difficult",
+      "very difficult",
+      "expert",
+      "extreme",
+      "black",
+      "black_diamond",
+      "black diamond",
+      "double_black",
+      "double black",
+      "double_black_diamond",
+      "double black diamond",
+    ].includes(key)
+  ) {
+    return "#1f2933";
+  }
+
+  if (["green", "green_circle", "green circle"].includes(key)) {
+    return "#30a46c";
+  }
+
   return "#75879a";
 }
 
@@ -71,43 +118,23 @@ function getOpenMetricLine(label, openCount, totalCount, fallbackTotal) {
   return `${label}: ${openCount}/${total ?? "?"} open`;
 }
 
-function prepareResort(resort) {
+function createMarkerWithBasicData(resort) {
   const coordinates = resort.coordinates;
   if (!coordinates) {
     return null;
   }
 
   return {
+    id: resort.id,
     marker: L.marker([coordinates.latitude, coordinates.longitude], {
       icon: RESORT_MARKER_ICON,
     }).bindPopup(createResortPopupHtml(resort)),
     point: L.latLng(coordinates.latitude, coordinates.longitude),
-    lifts: (resort.lifts ?? [])
-      .map((lift) =>
-        createFeatureLayer(
-          lift.geometry,
-          {
-            color: "#6b7280",
-            weight: 2,
-            opacity: 0.85,
-          },
-          `${lift.name ?? "Unnamed lift"}<br/>${formatStatusLabel(lift.status)}`
-        )
-      )
-      .filter(Boolean),
-    slopes: (resort.slopes ?? [])
-      .map((slope) =>
-        createFeatureLayer(
-          slope.geometry,
-          {
-            color: getSlopeColor(slope.difficulty),
-            weight: 2.5,
-            opacity: 0.95,
-          },
-          `${slope.name ?? "Unnamed slope"}<br/>${formatStatusLabel(slope.difficulty)} · ${formatStatusLabel(slope.status)}`
-        )
-      )
-      .filter(Boolean),
+    resort: resort,
+    liftsLoaded: false,
+    slopesLoaded: false,
+    lifts: [],
+    slopes: [],
   };
 }
 
@@ -117,11 +144,13 @@ export default function Map() {
   const clusterRef = useRef(null);
   const liftsLayerRef = useRef(null);
   const slopesLayerRef = useRef(null);
-  const preparedResortsRef = useRef([]);
+  const resortsMapRef = useRef(new Map()); // Map of resort.id -> prepared data
+  const loadingResortGeometryRef = useRef(new Set()); // Track which resorts are currently loading geometry
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  // Initialize map
   useEffect(() => {
     if (mapRef.current || !containerRef.current) {
       return undefined;
@@ -155,15 +184,16 @@ export default function Map() {
       clusterRef.current = null;
       liftsLayerRef.current = null;
       slopesLayerRef.current = null;
-      preparedResortsRef.current = [];
+      resortsMapRef.current.clear();
     };
   }, []);
 
+  // Load resort markers (lightweight operation)
   useEffect(() => {
     let cancelled = false;
 
-    async function loadMapData() {
-      if (!mapRef.current || !clusterRef.current || !liftsLayerRef.current || !slopesLayerRef.current) {
+    async function loadResortMarkers() {
+      if (!mapRef.current || !clusterRef.current) {
         return;
       }
 
@@ -171,21 +201,52 @@ export default function Map() {
         setLoading(true);
         setError("");
 
-        const resorts = await fetchResortsForMap();
-        if (cancelled) {
-          return;
+        let allResorts = [];
+        let offset = 0;
+        let hasMore = true;
+
+        // Load resorts in pages to avoid loading all at once
+        while (hasMore && !cancelled) {
+          const resortsPage = await fetchResortsForMap(PAGE_SIZE, offset);
+          
+          if (cancelled) {
+            return;
+          }
+
+          if (!Array.isArray(resortsPage) || resortsPage.length === 0) {
+            hasMore = false;
+            break;
+          }
+
+          allResorts = allResorts.concat(resortsPage);
+          offset += PAGE_SIZE;
+
+          // Add markers to map as we load them (don't wait for all pages)
+          resortsPage.forEach((resort) => {
+            const prepared = createMarkerWithBasicData(resort);
+            if (prepared) {
+              resortsMapRef.current.set(resort.id, prepared);
+              clusterRef.current.addLayer(prepared.marker);
+            }
+          });
+
+          // Only load 3 pages initially (150 resorts), remaining load on demand
+          if (allResorts.length >= 150) {
+            hasMore = false;
+          }
         }
 
-        preparedResortsRef.current = resorts.map(prepareResort).filter(Boolean);
-
-        clusterRef.current.clearLayers();
-        preparedResortsRef.current.forEach((resort) => {
-          clusterRef.current.addLayer(resort.marker);
-        });
-
-        const bounds = L.latLngBounds(preparedResortsRef.current.map((resort) => resort.point));
-        if (bounds.isValid()) {
-          mapRef.current.fitBounds(bounds.pad(0.18));
+        if (!cancelled) {
+          const allPoints = Array.from(resortsMapRef.current.values())
+            .map((r) => r.point)
+            .filter(Boolean);
+          
+          if (allPoints.length > 0) {
+            const bounds = L.latLngBounds(allPoints);
+            if (bounds.isValid()) {
+              mapRef.current.fitBounds(bounds.pad(0.18));
+            }
+          }
         }
       } catch (err) {
         if (!cancelled) {
@@ -198,13 +259,14 @@ export default function Map() {
       }
     }
 
-    loadMapData();
+    loadResortMarkers();
 
     return () => {
       cancelled = true;
     };
   }, []);
 
+  // Load geometry (slopes/lifts) on demand based on zoom and viewport
   useEffect(() => {
     const map = mapRef.current;
     const liftsLayer = liftsLayerRef.current;
@@ -214,32 +276,110 @@ export default function Map() {
       return undefined;
     }
 
+    let geometryLoadTimeout = null;
+
     const refreshVisibleLayers = () => {
-      const visibleBounds = map.getBounds().pad(0.12);
-      const zoom = map.getZoom();
-      const showLifts = zoom >= LIFTS_MIN_ZOOM;
-      const showSlopes = zoom >= SLOPES_MIN_ZOOM;
+      if (geometryLoadTimeout) {
+        clearTimeout(geometryLoadTimeout);
+      }
 
-      liftsLayer.clearLayers();
-      slopesLayer.clearLayers();
+      geometryLoadTimeout = setTimeout(() => {
+        const visibleBounds = map.getBounds().pad(0.12);
+        const zoom = map.getZoom();
+        const shouldLoadGeometry = zoom >= LIFTS_MIN_ZOOM;
 
-      preparedResortsRef.current.forEach((resort) => {
-        if (showLifts) {
-          resort.lifts.forEach((lift) => {
-            if (visibleBounds.intersects(lift.bounds)) {
-              liftsLayer.addLayer(lift.layer);
-            }
-          });
+        if (!shouldLoadGeometry) {
+          liftsLayer.clearLayers();
+          slopesLayer.clearLayers();
+          return;
         }
 
-        if (showSlopes) {
-          resort.slopes.forEach((slope) => {
-            if (visibleBounds.intersects(slope.bounds)) {
-              slopesLayer.addLayer(slope.layer);
-            }
-          });
-        }
-      });
+        // Find visible resorts and load their geometry
+        const resortsToLoad = Array.from(resortsMapRef.current.values()).filter((resortData) => {
+          if (visibleBounds.contains(resortData.point)) {
+            // Resort is in bounds
+            const geomLoading = loadingResortGeometryRef.current.has(resortData.id);
+            const alreadyLoaded = resortData.liftsLoaded && resortData.slopesLoaded;
+            return !geomLoading && !alreadyLoaded;
+          }
+          return false;
+        });
+
+        // Load geometry for visible resorts
+        resortsToLoad.forEach((resortData) => {
+          loadingResortGeometryRef.current.add(resortData.id);
+
+          Promise.all([
+            fetchLiftsForResort(resortData.id).catch(() => []),
+            fetchSlopesForResort(resortData.id).catch(() => []),
+          ])
+            .then(([liftsData, slopesData]) => {
+              // Create layers from fetched data
+              const lifts = Array.isArray(liftsData)
+                ? liftsData
+                    .map((lift) =>
+                      createFeatureLayer(
+                        lift.geometry,
+                        { color: "#6b7280", weight: 2, opacity: 0.85 },
+                        `${lift.name ?? "Unnamed lift"}<br/>${formatStatusLabel(lift.status)}`
+                      )
+                    )
+                    .filter(Boolean)
+                : [];
+
+              const slopes = Array.isArray(slopesData)
+                ? slopesData
+                    .map((slope) =>
+                      createFeatureLayer(
+                        slope.geometry,
+                        {
+                          color: getSlopeColor(slope.difficulty),
+                          weight: 2.5,
+                          opacity: 0.95,
+                        },
+                        `${slope.name ?? "Unnamed slope"}<br/>${formatStatusLabel(slope.difficulty)} · ${formatStatusLabel(slope.status)}`
+                      )
+                    )
+                    .filter(Boolean)
+                : [];
+
+              resortData.lifts = lifts;
+              resortData.slopes = slopes;
+              resortData.liftsLoaded = true;
+              resortData.slopesLoaded = true;
+              loadingResortGeometryRef.current.delete(resortData.id);
+            })
+            .catch(() => {
+              loadingResortGeometryRef.current.delete(resortData.id);
+            });
+        });
+
+        // Display loaded geometry
+        const showLifts = zoom >= LIFTS_MIN_ZOOM;
+        const showSlopes = zoom >= SLOPES_MIN_ZOOM;
+
+        liftsLayer.clearLayers();
+        slopesLayer.clearLayers();
+
+        Array.from(resortsMapRef.current.values()).forEach((resortData) => {
+          const pointInBounds = visibleBounds.contains(resortData.point);
+          if (pointInBounds && showLifts) {
+            resortData.lifts.forEach((lift) => {
+              if (visibleBounds.intersects(lift.bounds)) {
+                liftsLayer.addLayer(lift.layer);
+              }
+            });
+          }
+
+          if (pointInBounds && showSlopes) {
+            resortData.slopes.forEach((slope) => {
+              if (visibleBounds.intersects(slope.bounds)) {
+                slopesLayer.addLayer(slope.layer);
+              }
+            });
+          }
+        });
+      }, 300); // Debounce to avoid too many requests
     };
 
     refreshVisibleLayers();
@@ -249,6 +389,9 @@ export default function Map() {
     return () => {
       map.off("moveend", refreshVisibleLayers);
       map.off("zoomend", refreshVisibleLayers);
+      if (geometryLoadTimeout) {
+        clearTimeout(geometryLoadTimeout);
+      }
     };
   }, [loading]);
 
