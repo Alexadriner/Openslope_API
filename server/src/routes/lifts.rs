@@ -112,13 +112,8 @@ fn map_lift_row(lift: db::lifts::LiftWithResorts) -> LiftResponse {
     }
 }
 
-pub async fn get_lifts(db: web::Data<sqlx::MySqlPool>) -> Result<impl Responder, AppError> {
-    let lifts = db::lifts::get_all(db.get_ref()).await?;
-    Ok(HttpResponse::Ok().json(lifts.into_iter().map(map_lift_row).collect::<Vec<_>>()))
-}
-
 pub async fn get_lift_count(db: web::Data<sqlx::MySqlPool>) -> Result<impl Responder, AppError> {
-    let count = db::lifts::count(db.get_ref()).await?;
+    let count = db::lifts::get_all(db.get_ref()).await?.len();
     Ok(HttpResponse::Ok().json(serde_json::json!({ "count": count })))
 }
 

@@ -157,7 +157,6 @@ async fn main() -> std::io::Result<()> {
                     .route("/resorts/{id}", web::put().to(update_resort))
                     .route("/resorts/{id}", web::delete().to(delete_resort))
                     // Slopes endpoints
-                    .route("/slopes", web::get().to(get_slopes))
                     .route("/slopes/count", web::get().to(get_slope_count))
                     .route("/slopes/{id}", web::get().to(get_slope))
                     .route("/slopes", web::post().to(create_slope))
@@ -172,7 +171,6 @@ async fn main() -> std::io::Result<()> {
                         web::delete().to(delete_slopes_by_resort),
                     )
                     // Lifts endpoints
-                    .route("/lifts", web::get().to(get_lifts))
                     .route("/lifts/count", web::get().to(get_lift_count))
                     .route("/lifts/{id}", web::get().to(get_lift))
                     .route("/lifts", web::post().to(create_lift))
