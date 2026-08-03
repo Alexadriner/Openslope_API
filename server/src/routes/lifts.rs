@@ -4,13 +4,17 @@
 //! by associated resort IDs.
 
 use actix_web::{HttpResponse, Responder, web};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value;
 
 use crate::{
-    db, dto,
+    db,
     error::AppError,
-    models::db::Place,
+    models::{
+        db::Place,
+        lift::LiftResponse,
+        resort::ResortSummary,
+    },
     utils::{parse_feature_id, parse_geometry_to_wkt, parse_places, parse_related_ids},
 };
 
@@ -20,22 +24,6 @@ pub struct GeoJsonFeature {
     pub feature_type: String,
     pub geometry: Value,
     pub properties: Value,
-}
-
-#[derive(Serialize)]
-pub struct LiftResponse {
-    pub id: String,
-    pub name: Option<String>,
-    pub lift_type: Option<String>,
-    pub status: Option<String>,
-    pub capacity: Option<i32>,
-    pub duration: Option<i32>,
-    pub geometry: Value, // GeoJSON
-    pub websites: Option<Value>,
-    pub sources: Option<Value>,
-    pub places: Vec<Place>,
-    pub resorts: Vec<dto::resorts::ResortSummary>,
-    pub elevation_profile: Option<dto::lifts::ElevationProfileResponse>,
 }
 
 struct LiftPayload {
@@ -101,7 +89,7 @@ fn map_lift_row(lift: db::lifts::LiftWithResorts) -> LiftResponse {
     let resorts = lift
         .resorts
         .into_iter()
-        .map(|r| dto::resorts::ResortSummary {
+        .map(|r| ResortSummary {
             id: r.id,
             name: r.name,
             places: r.places,

@@ -96,92 +96,82 @@
 //! Author: OpenSlope Team
 //! Version: 1.0.0
 
-use super::lift::LiftResponse;
-use super::slope::SlopeResponse;
 use serde::Serialize;
 use serde_json::Value;
 
-/// Complete ski resort information for API responses
-///
-/// This is the main response model that contains comprehensive information about
-/// a ski resort, including its location, altitude data, ski area details, and
-/// all associated lifts and slopes.
-///
-/// # Example
-/// ```rust
-/// let resort = ResortResponse {
-///     id: "resort_123".to_string(),
-///     name: "Example Resort".to_string(),
-///     location: LocationBlock {
-///         country: "Austria".to_string(),
-///         region: "Tyrol".to_string(),
-///         continent: "Europe".to_string(),
-///         latitude: 47.2628,
-///         longitude: 11.3936,
-///     },
-///     altitude: AltitudeBlock {
-///         village_altitude_m: 1200,
-///         min_altitude_m: 1100,
-///         max_altitude_m: 2500,
-///     },
-///     ski_area: SkiAreaBlock {
-///         name: "Example Ski Area".to_string(),
-///         area_type: "Alpine".to_string(),
-///         total_slope_km: Some(50.5),
-///         total_lifts: Some(15),
-///         snowmaking_percent: Some(80),
-///         night_skiing: Some(false),
-///     },
-///     lifts: vec![],
-///     slopes: vec![],
-/// };
-/// ```
+/// Summary view of a resort used by list endpoints and nested relationships.
+#[derive(Serialize)]
+pub struct ResortSummary {
+    pub id: String,
+    pub name: String,
+    pub places: Vec<super::db::Place>,
+}
+
+/// Summary view for a lift nested inside a resort response.
+#[derive(Clone, Serialize)]
+pub struct LiftSummary {
+    pub id: String,
+    pub name: Option<String>,
+    pub lift_type: Option<String>,
+    pub status: Option<String>,
+    pub capacity: Option<i32>,
+    pub duration: Option<i32>,
+    pub geometry: Option<Value>,
+    pub places: Vec<super::db::Place>,
+}
+
+/// Summary view for a slope nested inside a resort response.
+#[derive(Clone, Serialize)]
+pub struct SlopeSummary {
+    pub id: String,
+    pub name: Option<String>,
+    pub difficulty: Option<String>,
+    pub status: Option<String>,
+    pub grooming: Option<String>,
+    pub geometry: Option<Value>,
+    pub places: Vec<super::db::Place>,
+}
+
+/// Snapshot summary attached to a resort response.
+#[derive(Clone, Serialize)]
+pub struct ResortSnapshotSummary {
+    pub snapshot_time: Option<String>,
+    pub lifts_open_count: Option<i32>,
+    pub lifts_total_count: Option<i32>,
+    pub slopes_open_count: Option<i32>,
+    pub slopes_total_count: Option<i32>,
+    pub snow_depth_valley_cm: Option<i16>,
+    pub snow_depth_mountain_cm: Option<i16>,
+    pub new_snow_24h_cm: Option<i16>,
+    pub temperature_valley_c: Option<f64>,
+    pub temperature_mountain_c: Option<f64>,
+}
+
+/// Aggregated counts for a resort response.
+#[derive(Clone, Serialize)]
+pub struct ResortStats {
+    pub lift_count: usize,
+    pub slope_count: usize,
+    pub open_lift_count: Option<i32>,
+    pub open_slope_count: Option<i32>,
+}
+
+/// Complete resort response used by the routing layer.
 #[derive(Serialize)]
 pub struct ResortResponse {
-    /// Unique identifier for the resort
     pub id: String,
-    /// Official name of the resort
     pub name: String,
-    /// Resort type or category (e.g. "alpine", "cross-country")
     pub r#type: Option<String>,
-    /// Current status of the resort
     pub status: Option<String>,
-    /// Wikidata identifier for the resort
-    pub wikidata_id: Option<String>,
-    /// Geographical and administrative location information
-    pub location: LocationBlock,
-    /// Elevation data for the resort
-    pub altitude: AltitudeBlock,
-    /// Information about the ski area operations
-    pub ski_area: SkiAreaBlock,
-    /// General place-level metadata from the geojson import
-    pub places: Option<Value>,
-    /// Source metadata for the resort record
-    pub sources: Option<Value>,
-    /// Website links associated with the resort
-    pub websites: Option<Value>,
-    /// Activity flags and additional operations metadata
     pub activities: Option<Value>,
-    /// Statistical information for the resort
-    pub statistics: Option<Value>,
-    /// Viewport hint for map rendering
-    pub viewport_hint: Option<Value>,
-    /// Run convention metadata for the resort
-    pub run_convention: Option<String>,
-    /// Geometry type of the resort location
-    pub geometry_type: Option<String>,
-    /// GeoJSON geometry payload for the resort
-    pub geometry: Option<Value>,
-    /// Additional GeoJSON properties for the resort
-    pub properties: Option<Value>,
-    /// Database creation timestamp
-    pub created_at: Option<String>,
-    /// Database update timestamp
-    pub updated_at: Option<String>,
-    /// List of all lifts in the resort
-    pub lifts: Vec<LiftResponse>,
-    /// List of all slopes in the resort
-    pub slopes: Vec<SlopeResponse>,
+    pub geometry: Value,
+    pub websites: Option<Value>,
+    pub sources: Option<Value>,
+    pub places: Vec<super::db::Place>,
+    pub stats: ResortStats,
+    pub latest_snapshot: Option<ResortSnapshotSummary>,
+    pub lifts: Vec<LiftSummary>,
+    pub slopes: Vec<SlopeSummary>,
 }
 
 /// Geographical and administrative location information
