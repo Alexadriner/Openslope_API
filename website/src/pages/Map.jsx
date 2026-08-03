@@ -138,7 +138,7 @@ function createMarkerWithBasicData(resort) {
   };
 }
 
-export default function Map() {
+export default function ResortMap() {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const clusterRef = useRef(null);

@@ -34,7 +34,7 @@ pub async fn get_paginated(
 
     if exceeded_limit {
         eprintln!(
-            "Warning: requested resort limit {} exceeds the maximum of {}. Returning {} resorts instead.",
+            "Warning: requested resort limit {} exceeds the recommended maximum of {}. Returning {} resorts without capping.",
             requested_limit, MAX_RESORT_LIMIT, effective_limit
         );
     }
@@ -77,7 +77,7 @@ pub async fn count(pool: &MySqlPool) -> Result<i64, sqlx::Error> {
 
 fn resolve_limit(requested_limit: usize) -> (usize, bool) {
     if requested_limit > MAX_RESORT_LIMIT {
-        (MAX_RESORT_LIMIT, true)
+        (requested_limit, true)
     } else {
         (requested_limit, false)
     }
@@ -96,10 +96,11 @@ mod tests {
     }
 
     #[test]
-    fn caps_requested_limit_when_it_exceeds_maximum() {
-        let (limit, exceeded) = resolve_limit(MAX_RESORT_LIMIT + 3);
+    fn preserves_requested_limit_when_it_exceeds_maximum() {
+        let requested_limit = MAX_RESORT_LIMIT + 3;
+        let (limit, exceeded) = resolve_limit(requested_limit);
 
-        assert_eq!(limit, MAX_RESORT_LIMIT);
+        assert_eq!(limit, requested_limit);
         assert!(exceeded);
     }
 }
