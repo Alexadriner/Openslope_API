@@ -133,7 +133,7 @@ use url::form_urlencoded;
 use crate::security::api_key::generate_api_key;
 use crate::security::hash::hash_secret;
 use crate::security::hash::verify_secret;
-use crate::user_service::create_user;
+use crate::services::user_service::register_user;
 
 #[derive(Deserialize)]
 pub struct SignupRequest {
@@ -165,33 +165,17 @@ pub struct AuthResponse {
 }
 
 pub async fn signup(pool: web::Data<MySqlPool>, data: web::Json<SignupRequest>) -> impl Responder {
-    match create_user(pool.get_ref(), &data.username, &data.email, &data.password).await {
-        Ok(api_key) => {
-            let user = sqlx::query!(
-                r#"
-                SELECT id, name, email, is_admin, subscription
-                FROM users
-                WHERE email = ?
-                "#,
-                data.email
-            )
-            .fetch_optional(pool.get_ref())
-            .await;
-
-            match user {
-                Ok(Some(u)) => HttpResponse::Created().json(AuthResponse {
-                    api_key,
-                    user: AuthUser {
-                        id: u.id,
-                        name: u.name,
-                        email: u.email,
-                        is_admin: u.is_admin == 1,
-                        subscription: u.subscription,
-                    },
-                }),
-                _ => HttpResponse::InternalServerError().body("Could not load user data"),
-            }
-        }
+    match register_user(pool.get_ref(), &data.username, &data.email, &data.password).await {
+        Ok(result) => HttpResponse::Created().json(AuthResponse {
+            api_key: result.api_key,
+            user: AuthUser {
+                id: result.user.id,
+                name: result.user.name,
+                email: result.user.email,
+                is_admin: result.user.is_admin,
+                subscription: result.user.subscription,
+            },
+        }),
         Err(e) => {
             eprintln!("Signup failed: {}", e);
             HttpResponse::BadRequest().body("User already exists")

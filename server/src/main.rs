@@ -75,7 +75,7 @@ mod error;
 mod models;
 mod routes;
 mod security;
-mod user_service;
+mod services;
 mod utils;
 
 use auth::ApiKeyAuth;

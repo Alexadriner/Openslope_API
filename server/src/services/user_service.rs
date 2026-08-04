@@ -154,6 +154,21 @@ use sqlx::MySqlPool;
 use crate::security::api_key::generate_api_key;
 use crate::security::hash::hash_secret;
 
+#[derive(Debug, Clone)]
+pub struct UserSummary {
+    pub id: i64,
+    pub name: String,
+    pub email: String,
+    pub is_admin: bool,
+    pub subscription: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct RegistrationResult {
+    pub api_key: String,
+    pub user: UserSummary,
+}
+
 /// Create a new user with secure password and API key handling
 ///
 /// This function creates a new user in the database with proper security measures:
@@ -239,33 +254,55 @@ pub async fn create_user(
     email: &str,
     password: &str,
 ) -> Result<String, sqlx::Error> {
-    // 1. API-Key generieren
-    // Generates a cryptographically secure 32-byte API key encoded in URL-safe base64
     let api_key_plain = generate_api_key();
-    
-    // 2. Hashes erzeugen
-    // Hash both the API key and password using Argon2 for secure storage
     let api_key_hash = hash_secret(&api_key_plain);
     let password_hash = hash_secret(password);
 
-    // 3. User speichern
-    // Insert the new user into the database with hashed credentials
-    // Default values: is_admin = 0 (false), subscription = 'Free'
     sqlx::query!(
-            r#"
-            INSERT INTO users (name, email, password_hash, api_key, is_admin, subscription)
-            VALUES (?, ?, ?, ?, 0, 'Free')
-            "#,
-            name,
-            email,
-            password_hash,
-            api_key_hash
+        r#"
+        INSERT INTO users (name, email, password_hash, api_key, is_admin, subscription)
+        VALUES (?, ?, ?, ?, 0, 'Free')
+        "#,
+        name,
+        email,
+        password_hash,
+        api_key_hash
     )
     .execute(pool)
     .await?;
 
-    // 4. Klartext-API-Key zurückgeben
-    // Return the API key in plaintext - this is the only time it's available
-    // The client must store this securely as it cannot be retrieved again
     Ok(api_key_plain)
+}
+
+pub async fn register_user(
+    pool: &MySqlPool,
+    name: &str,
+    email: &str,
+    password: &str,
+) -> Result<RegistrationResult, sqlx::Error> {
+    let api_key = create_user(pool, name, email, password).await?;
+
+    let user = sqlx::query!(
+        r#"
+        SELECT id, name, email, is_admin, subscription
+        FROM users
+        WHERE email = ?
+        "#,
+        email
+    )
+    .fetch_optional(pool)
+    .await?;
+
+    let user = user.ok_or(sqlx::Error::RowNotFound)?;
+
+    Ok(RegistrationResult {
+        api_key,
+        user: UserSummary {
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            is_admin: user.is_admin == 1,
+            subscription: user.subscription,
+        },
+    })
 }
