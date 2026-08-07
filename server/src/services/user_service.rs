@@ -152,7 +152,7 @@
 
 use sqlx::MySqlPool;
 use crate::security::api_key::generate_api_key;
-use crate::security::hash::hash_secret;
+use crate::security::hash::{hash_secret, verify_secret};
 
 #[derive(Debug, Clone)]
 pub struct UserSummary {
@@ -167,6 +167,19 @@ pub struct UserSummary {
 pub struct RegistrationResult {
     pub api_key: String,
     pub user: UserSummary,
+}
+
+#[derive(Debug)]
+pub enum AuthError {
+    InvalidCredentials,
+    MissingApiKey,
+    Database(sqlx::Error),
+}
+
+impl From<sqlx::Error> for AuthError {
+    fn from(value: sqlx::Error) -> Self {
+        AuthError::Database(value)
+    }
 }
 
 /// Create a new user with secure password and API key handling
@@ -294,6 +307,50 @@ pub async fn register_user(
     .await?;
 
     let user = user.ok_or(sqlx::Error::RowNotFound)?;
+
+    Ok(RegistrationResult {
+        api_key,
+        user: UserSummary {
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            is_admin: user.is_admin == 1,
+            subscription: user.subscription,
+        },
+    })
+}
+
+pub async fn sign_in_user(
+    pool: &MySqlPool,
+    identifier: &str,
+    password: &str,
+) -> Result<RegistrationResult, AuthError> {
+    let user = sqlx::query!(
+        r#"
+        SELECT id, name, email, password_hash, api_key, is_admin, subscription
+        FROM users
+        WHERE email = ? OR name = ?
+        LIMIT 1
+        "#,
+        identifier,
+        identifier
+    )
+    .fetch_optional(pool)
+    .await?;
+
+    let user = match user {
+        Some(u) => u,
+        None => return Err(AuthError::InvalidCredentials),
+    };
+
+    if !verify_secret(password, &user.password_hash) {
+        return Err(AuthError::InvalidCredentials);
+    }
+
+    let api_key = match user.api_key.trim() {
+        key if !key.is_empty() => key.to_string(),
+        _ => return Err(AuthError::MissingApiKey),
+    };
 
     Ok(RegistrationResult {
         api_key,

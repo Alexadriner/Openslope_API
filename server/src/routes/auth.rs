@@ -130,10 +130,8 @@ use serde::{Deserialize, Serialize};
 use sqlx::MySqlPool;
 use url::form_urlencoded;
 
-use crate::security::api_key::generate_api_key;
-use crate::security::hash::hash_secret;
 use crate::security::hash::verify_secret;
-use crate::services::user_service::register_user;
+use crate::services::user_service::{register_user, sign_in_user};
 
 #[derive(Deserialize)]
 pub struct SignupRequest {
@@ -192,55 +190,26 @@ pub async fn signin(pool: web::Data<MySqlPool>, data: web::Json<SigninRequest>) 
         return HttpResponse::BadRequest().body("Missing username or email");
     }
 
-    let user = sqlx::query!(
-        r#"
-        SELECT id, name, email, password_hash, is_admin, subscription
-        FROM users
-        WHERE email = ? OR name = ?
-        LIMIT 1
-        "#,
-        identifier,
-        identifier
-    )
-    .fetch_optional(pool.get_ref())
-    .await;
-
-    let user = match user {
-        Ok(Some(u)) => u,
-        _ => return HttpResponse::Unauthorized().body("Invalid credentials"),
-    };
-
-    if !verify_secret(&data.password, &user.password_hash) {
-        return HttpResponse::Unauthorized().body("Invalid credentials");
-    }
-
-    let api_key_plain = generate_api_key();
-    let api_key_hash = hash_secret(&api_key_plain);
-
-    let updated = sqlx::query!(
-        r#"
-        UPDATE users
-        SET api_key = ?
-        WHERE id = ?
-        "#,
-        api_key_hash,
-        user.id
-    )
-    .execute(pool.get_ref())
-    .await;
-
-    match updated {
-        Ok(_) => HttpResponse::Ok().json(AuthResponse {
-            api_key: api_key_plain,
+    match sign_in_user(pool.get_ref(), identifier, &data.password).await {
+        Ok(result) => HttpResponse::Ok().json(AuthResponse {
+            api_key: result.api_key,
             user: AuthUser {
-                id: user.id,
-                name: user.name,
-                email: user.email,
-                is_admin: user.is_admin == 1,
-                subscription: user.subscription,
+                id: result.user.id,
+                name: result.user.name,
+                email: result.user.email,
+                is_admin: result.user.is_admin,
+                subscription: result.user.subscription,
             },
         }),
-        Err(_) => HttpResponse::InternalServerError().body("Could not update api key"),
+        Err(crate::services::user_service::AuthError::InvalidCredentials) => {
+            HttpResponse::Unauthorized().body("Invalid credentials")
+        }
+        Err(crate::services::user_service::AuthError::Database(_)) => {
+            HttpResponse::InternalServerError().body("Database error")
+        }
+        Err(crate::services::user_service::AuthError::MissingApiKey) => {
+            HttpResponse::Unauthorized().body("No API key available for this user")
+        }
     }
 }
 
