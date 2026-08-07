@@ -208,16 +208,58 @@ pub async fn get_resorts(
     }
 
     let resorts = db::resorts::get_paginated(db.get_ref(), offset, limit).await?;
-    let lifts = db::lifts::get_all(db.get_ref()).await?;
-    let slopes = db::slopes::get_all(db.get_ref()).await?;
     let resort_ids = resorts
         .iter()
         .map(|resort| resort.id.clone())
         .collect::<Vec<_>>();
     let latest_snapshots = db::status::get_latest_for_resorts(db.get_ref(), &resort_ids).await?;
 
-    let lifts_by_resort = lift_summaries_by_resort(lifts);
-    let slopes_by_resort = slope_summaries_by_resort(slopes);
+    let mut lifts_by_resort: std::collections::HashMap<String, Vec<LiftSummary>> =
+        std::collections::HashMap::new();
+    for resort_id in &resort_ids {
+        let resort_lifts = db::lifts::get_by_resort(db.get_ref(), resort_id).await?;
+        for lift in resort_lifts {
+            let summary = LiftSummary {
+                id: lift.lift.id.clone(),
+                name: lift.lift.name.clone(),
+                lift_type: lift.lift.r#type.clone(),
+                status: lift.lift.status.clone(),
+                capacity: lift.lift.capacity,
+                duration: lift.lift.duration,
+                geometry: Some(lift.lift.geometry.clone()),
+                places: lift.lift.places.clone(),
+            };
+            for resort in &lift.resorts {
+                lifts_by_resort
+                    .entry(resort.id.clone())
+                    .or_default()
+                    .push(summary.clone());
+            }
+        }
+    }
+
+    let mut slopes_by_resort: std::collections::HashMap<String, Vec<SlopeSummary>> =
+        std::collections::HashMap::new();
+    for resort_id in &resort_ids {
+        let resort_slopes = db::slopes::get_by_resort(db.get_ref(), resort_id).await?;
+        for slope in resort_slopes {
+            let summary = SlopeSummary {
+                id: slope.slope.id.clone(),
+                name: slope.slope.name.clone(),
+                difficulty: slope.slope.difficulty.clone(),
+                status: slope.slope.status.clone(),
+                grooming: slope.slope.grooming.clone(),
+                geometry: Some(slope.slope.geometry.clone()),
+                places: slope.slope.places.clone(),
+            };
+            for resort in &slope.resorts {
+                slopes_by_resort
+                    .entry(resort.id.clone())
+                    .or_default()
+                    .push(summary.clone());
+            }
+        }
+    }
 
     let response: Vec<ResortResponse> = resorts
         .into_iter()
