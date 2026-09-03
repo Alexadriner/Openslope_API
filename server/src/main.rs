@@ -117,14 +117,21 @@ async fn main() -> std::io::Result<()> {
     dotenv().ok();
 
     // Get database URL from environment or use default
-    let database_url = env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "mysql://username:password@Central.local:3306/openslope_db".to_string()
-    });
+    let database_url: String = match env::var("DATABASE_URL") {
+        Ok(url) => url,
+        Err(err) => {
+            return Err(std::io::Error::new(std::io::ErrorKind::Other, format!("DATABASE_URL not set or found. Check your .env file or environment variables: {err}")));
+        }
+    };
 
     // Establish database connection pool
     let pool = MySqlPool::connect(&database_url)
         .await
-        .expect("DB connection failed");
+        .map_err(|err| {
+        std::io::Error::new(
+            std::io::ErrorKind::Other, format!("DB connection failed. Check if DB server is running: {err}"),
+        )
+    })?;
 
     // Log server startup
     println!("Server läuft auf Port 8080");
